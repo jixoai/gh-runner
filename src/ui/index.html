@@ -64,10 +64,10 @@
     display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
   }
   .pill.busy { color: var(--run); background: color-mix(in srgb, var(--run) 14%, transparent); }
-  .pill.running { color: var(--ok); background: color-mix(in srgb, var(--ok) 13%, transparent); }
+  .pill.running { color: #23703f; background: color-mix(in srgb, var(--ok) 13%, transparent); }
   .pill.stopped { color: var(--ink-2); }
   .pill.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
-  .pill.external { color: #6a3fbf; background: color-mix(in srgb, #8a63d2 16%, transparent); }
+  .pill.external { color: #6b48b8; background: color-mix(in srgb, #8a63d2 16%, transparent); }
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--idle); flex: none; }
   .dot.running { background: var(--ok); }
   .dot.busy { background: var(--run); animation: pulse 1.4s ease-in-out infinite; }
@@ -102,7 +102,7 @@
     padding: 0; width: 460px; max-width: 92vw;
     /* `* {margin:0}` 会吞掉 <dialog> 的 UA 居中 margin:auto，必须显式恢复；
        display 只能在 [open] 态给 flex，否则盖掉 UA 的 display:none */
-    margin: auto; max-height: calc(100vh - 32px);
+    margin: auto; max-height: calc(100vh - 20px);
   }
   dialog[open] { display: flex; flex-direction: column; }
   dialog::backdrop { background: rgba(0,0,0,.35); backdrop-filter: blur(2px); }
@@ -132,8 +132,8 @@
     background: var(--bg); border-radius: 7px; padding: 8px; margin-top: 8px; display: none; user-select: text;
   }
   #toast {
-    position: fixed; top: 52px; right: 16px; transform: translateY(-12px);
-    background: var(--ink); color: var(--bg); border-radius: 9px; padding: 7px 16px; font-size: 12px;
+    position: fixed; top: 11px; right: 176px; transform: translateY(-8px);
+    background: var(--ink); color: var(--bg); border-radius: 9px; padding: 6px 14px; font-size: 12px;
     opacity: 0; pointer-events: none; transition: all .25s; max-width: 46%; z-index: 50;
   }
   #toast.show { opacity: 1; transform: translateY(0); }
@@ -421,7 +421,9 @@ setInterval(() => {
 $("#btn-new").addEventListener("click", () => {
   $("#reg-progress").style.display = "none";
   $("#reg-progress").textContent = "";
-  $("#reg-submit").disabled = false;
+  const submitBtn = $("#reg-submit");
+  submitBtn.disabled = false;
+  submitBtn.textContent = "注册并启动";
   $("#register-dlg").showModal();
 });
 $("#reg-cancel").addEventListener("click", () => $("#register-dlg").close());
@@ -432,7 +434,10 @@ $("#register-form").addEventListener("submit", (e) => {
   const get = (k) => String(fd.get(k) ?? "").trim();
   const progress = $("#reg-progress");
   progress.style.display = "block";
-  $("#reg-submit").disabled = true;
+  progress.scrollIntoView({ block: "nearest" });
+  const submitBtn = $("#reg-submit");
+  submitBtn.disabled = true;
+  submitBtn.textContent = "注册中…";
   send({
     type: "register",
     dir: get("dir"), name: get("name"), token: get("token"), labels: get("labels"),
