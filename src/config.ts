@@ -6,7 +6,7 @@
  * 2. 注册新实例 / 更新实例配置的纯数据操作。
  */
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { InstanceConfig, ToolConfig } from "./types.ts";
@@ -21,25 +21,42 @@ function configPath(): string {
   return join(configDir(), "config.json");
 }
 
+/** 形状校验：损坏的实例项直接丢弃（手编配置/撕裂写的容错），不让 boot 崩掉。 */
+function validInstance(item: unknown): item is InstanceConfig {
+  return (
+    typeof item === "object" && item !== null &&
+    typeof (item as InstanceConfig).dir === "string" &&
+    (item as InstanceConfig).dir.startsWith("/") &&
+    typeof (item as InstanceConfig).id === "string"
+  );
+}
+
 export async function loadConfig(): Promise<ToolConfig> {
   try {
-    const raw = await readFile(configPath(), "utf8");
+    const raw = (await readFile(configPath(), "utf8")).replace(/^\uFEFF/, "");
     const parsed = JSON.parse(raw) as Partial<ToolConfig>;
+    const searchDirs = Array.isArray(parsed.searchDirs)
+      ? parsed.searchDirs.filter((d): d is string => typeof d === "string" && d.startsWith("/"))
+      : [];
+    const instances = Array.isArray(parsed.instances)
+      ? parsed.instances.filter((i): i is InstanceConfig => validInstance(i))
+      : [];
     return {
-      searchDirs:
-        Array.isArray(parsed.searchDirs) && parsed.searchDirs.length > 0
-          ? parsed.searchDirs
-          : DEFAULT_SEARCH_DIRS,
-      instances: Array.isArray(parsed.instances) ? parsed.instances : [],
+      searchDirs: searchDirs.length > 0 ? searchDirs : DEFAULT_SEARCH_DIRS,
+      instances,
     };
   } catch {
     return { searchDirs: DEFAULT_SEARCH_DIRS, instances: [] };
   }
 }
 
+/** 原子写：tmp + rename，杜绝撕裂写（损坏的 config 会 brick 启动路径）。 */
 export async function saveConfig(config: ToolConfig): Promise<void> {
   await mkdir(configDir(), { recursive: true });
-  await writeFile(configPath(), `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  const path = configPath();
+  const tmp = `${path}.tmp`;
+  await writeFile(tmp, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  await rename(tmp, path);
 }
 
 export function upsertInstance(
@@ -48,12 +65,4 @@ export function upsertInstance(
 ): ToolConfig {
   const rest = config.instances.filter((i) => i.id !== instance.id && i.dir !== instance.dir);
   return { ...config, instances: [...rest, instance] };
-}
-
-export function removeInstance(config: ToolConfig, id: string): ToolConfig {
-  return { ...config, instances: config.instances.filter((i) => i.id !== id) };
-}
-
-export function autoStartOf(config: ToolConfig, id: string): boolean {
-  return config.instances.find((i) => i.id === id)?.autoStart ?? false;
 }

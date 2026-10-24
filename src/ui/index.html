@@ -16,12 +16,13 @@
   :root {
     color-scheme: light dark;
     --bg: #f5f5f7; --pane: #ffffff; --line: rgba(0,0,0,.1); --ink: #1d1d1f; --ink-2: #6e6e73;
-    --ok: #34c759; --bad: #ff3b30; --run: #0a84ff; --warn: #ff9f0a; --idle: #8e8e93;
+    --ok: #1b7f3b; --bad: #c41e25; --run: #0a5ec4; --warn: #b25e00; --idle: #8e8e93;
     --chip: rgba(0,0,0,.05); --mono: ui-monospace, "SF Mono", Menlo, monospace;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #1e1e20; --pane: #28282a; --line: rgba(255,255,255,.12); --ink: #f5f5f7; --ink-2: #98989d;
+      --ok: #4cd964; --bad: #ff6961; --run: #64a8ff; --warn: #ffb340; --idle: #8e8e93;
       --chip: rgba(255,255,255,.08);
     }
   }
@@ -62,12 +63,21 @@
     font-size: 11px; padding: 1px 8px; border-radius: 99px; background: var(--chip); color: var(--ink-2);
     display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
   }
+  .pill.busy { color: var(--run); background: color-mix(in srgb, var(--run) 14%, transparent); }
+  .pill.running { color: var(--ok); background: color-mix(in srgb, var(--ok) 13%, transparent); }
+  .pill.stopped { color: var(--ink-2); }
+  .pill.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+  .pill.external { color: #6a3fbf; background: color-mix(in srgb, #8a63d2 16%, transparent); }
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--idle); flex: none; }
   .dot.running { background: var(--ok); }
-  .dot.busy { background: var(--run); animation: pulse 1.2s ease-in-out infinite; }
+  .dot.busy { background: var(--run); animation: pulse 1.4s ease-in-out infinite; }
   .dot.stopping, .dot.starting { background: var(--warn); }
   .dot.stopped { background: var(--idle); }
-  @keyframes pulse { 50% { opacity: .35; } }
+  /* 核心恒不透明，仅外环呼吸——避免低相位状态"消失" */
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--run) 45%, transparent); }
+    50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--run) 0%, transparent); }
+  }
   .jobline { font-size: 12px; color: var(--ink-2); grid-column: 1 / -1; min-height: 18px; }
   .jobline b { color: var(--ink); }
   .jobline .ok { color: var(--ok); } .jobline .bad { color: var(--bad); }
@@ -81,8 +91,8 @@
   }
   .logpane-head .log-title { font-weight: 600; color: var(--ink); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #log {
-    flex: 1; overflow-y: auto; padding: 10px 12px; font-family: var(--mono); font-size: 11px;
-    line-height: 1.5; white-space: pre-wrap; word-break: break-all; user-select: text;
+    flex: 1; overflow: auto; padding: 10px 12px; font-family: var(--mono); font-size: 11px;
+    line-height: 1.5; white-space: pre; user-select: text;
   }
   #log .l-ok { color: var(--ok); } #log .l-bad { color: var(--bad); } #log .l-run { color: var(--run); }
   #log .l-dim { color: var(--ink-2); }
@@ -90,9 +100,22 @@
   dialog {
     border: 1px solid var(--line); border-radius: 14px; background: var(--pane); color: var(--ink);
     padding: 0; width: 460px; max-width: 92vw;
+    /* `* {margin:0}` 会吞掉 <dialog> 的 UA 居中 margin:auto，必须显式恢复；
+       display 只能在 [open] 态给 flex，否则盖掉 UA 的 display:none */
+    margin: auto; max-height: calc(100vh - 32px);
   }
+  dialog[open] { display: flex; flex-direction: column; }
   dialog::backdrop { background: rgba(0,0,0,.35); backdrop-filter: blur(2px); }
-  .dlg-body { padding: 16px 18px; }
+  /* form 是 dialog 的唯一子元素，flex 链路必须经它传到 body/footer */
+  #register-form { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+  #register-form .dlg-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+  #register-form .dlg-foot { flex: 0 0 auto; }
+  .dlg-body { padding: 16px 18px; overflow-y: auto; flex: 1; min-height: 0; }
+  .dlg-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px 0; }
+  .dlg-head h2 { font-size: 15px; }
+  .dlg-head .dlg-close {
+    border: none; background: none; color: var(--ink-2); font-size: 16px; padding: 2px 8px; cursor: pointer;
+  }
   .dlg-body h2 { font-size: 15px; margin-bottom: 12px; }
   .field { margin-bottom: 10px; display: grid; gap: 3px; }
   .field label { font-size: 11px; color: var(--ink-2); }
@@ -102,15 +125,16 @@
   }
   .field input:focus { outline: 2px solid color-mix(in srgb, var(--run) 55%, transparent); border-color: transparent; }
   .field .hint { font-size: 10.5px; color: var(--ink-2); }
+  .field .hint a { color: var(--run); text-decoration: none; }
   .dlg-foot { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 18px; border-top: 1px solid var(--line); }
   #reg-progress {
     font-family: var(--mono); font-size: 10.5px; max-height: 130px; overflow-y: auto; white-space: pre-wrap;
     background: var(--bg); border-radius: 7px; padding: 8px; margin-top: 8px; display: none; user-select: text;
   }
   #toast {
-    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%) translateY(20px);
+    position: fixed; top: 48px; left: 50%; transform: translateX(-50%) translateY(-12px);
     background: var(--ink); color: var(--bg); border-radius: 9px; padding: 7px 16px; font-size: 12px;
-    opacity: 0; pointer-events: none; transition: all .25s; max-width: 80%;
+    opacity: 0; pointer-events: none; transition: all .25s; max-width: 80%; z-index: 50;
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   .scroll-thin { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--ink-2) 45%, transparent) transparent; }
@@ -133,7 +157,7 @@
     <div class="logpane-head">
       <span class="log-title" id="log-title">日志（选择实例）</span>
       <label class="switch"><input type="checkbox" id="autoscroll" checked> 自动滚动</label>
-      <button class="icon-btn" id="btn-diag" title="在 Finder 中打开 _diag">_diag</button>
+      <button class="icon-btn" id="btn-diag" title="在 Finder 中打开该实例的 _diag 目录">⌖ 日志目录</button>
     </div>
     <pre id="log" class="scroll-thin"></pre>
   </section>
@@ -141,8 +165,11 @@
 
 <dialog id="register-dlg">
   <form id="register-form" method="dialog">
-    <div class="dlg-body">
+    <div class="dlg-head">
       <h2>注册新 runner 实例</h2>
+      <button type="button" class="dlg-close" id="dlg-close" title="关闭">✕</button>
+    </div>
+    <div class="dlg-body">
       <div class="field">
         <label>实例目录（必须为空目录）</label>
         <input name="dir" placeholder="/Volumes/bnqkl/Users/kzf/actions-runner-5" required>
@@ -153,8 +180,8 @@
       </div>
       <div class="field">
         <label>注册 Token（org 设置页生成，一次性）</label>
-        <input name="token" type="password" placeholder="Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" required>
-        <span class="hint">获取：https://github.com/organizations/jixoai/settings/actions/runners/new</span>
+        <input name="token" type="password" placeholder="粘贴一次性注册 Token" required>
+        <span class="hint">获取：<a href="https://github.com/organizations/jixoai/settings/actions/runners/new" target="_blank">org runners 新建页</a>（自动解包本机已有分发包）</span>
       </div>
       <div class="field">
         <label>Labels</label>
@@ -165,8 +192,8 @@
         <input name="orgUrl" value="https://github.com/jixoai">
       </div>
       <div class="field">
-        <label>Work 目录（独立于其它实例，避免缓存互踩）</label>
-        <input name="workFolder" placeholder="/Volumes/bnqkl/Users/kzf/gh-runner-work-5">
+        <label>Work 目录（必填，独立于其它实例，避免缓存互踩）</label>
+        <input name="workFolder" placeholder="/Volumes/bnqkl/Users/kzf/gh-runner-work-5" required>
       </div>
       <div class="field">
         <label>分发包（留空自动探测 actions-runner-osx-*.tar.gz）</label>
@@ -218,23 +245,27 @@ function dotClass(inst) {
 }
 function stateText(inst) {
   if (inst.currentJob) return "作业中";
-  const map = { running: "空闲", stopped: "已停止", starting: "启动中…", stopping: "停止中…", configuring: "配置中…" };
+  const map = { running: "空闲", stopped: "已停止", starting: "启动中…", stopping: "停止中…" };
   return map[inst.processState] || inst.processState;
 }
 function fmtDuration(ms) {
   const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 5) return "刚刚";
   if (s < 60) return s + "s";
   const m = Math.floor(s / 60);
-  return m + "m" + String(s % 60).padStart(2, "0") + "s";
+  if (m < 60) return s % 60 === 0 ? m + "m" : m + "m" + (s % 60) + "s";
+  const h = Math.floor(m / 60);
+  return h + "h" + (m % 60) + "m";
 }
 function fmtAgo(iso) {
   return fmtDuration(Math.max(0, Date.now() - Date.parse(iso))) + " 前";
 }
 function outcomeBadge(run) {
   const ok = run.outcome === "Succeeded" || run.outcome === "SucceededWithIssues";
-  const cls = ok ? "ok" : "bad";
+  const cls = ok ? "ok" : (run.outcome === "Canceled" || run.outcome === "Skipped" ? "warn" : "bad");
   const mark = ok ? "✔" : "✘";
-  return `<span class="${cls}">${mark} ${esc(run.job)} → ${esc(run.outcome)}（${fmtDuration(run.durationMs)}，${fmtAgo(run.at)}）</span>`;
+  return `<b>${esc(run.job)}</b> → <span class="${cls}">${mark} ${esc(run.outcome)}</span>` +
+    `<span style="color:var(--ink-2)">（${fmtDuration(run.durationMs)}，${fmtAgo(run.at)}）</span>`;
 }
 
 function render() {
@@ -289,9 +320,9 @@ function cardHtml(inst) {
     <div class="name-row">
       <span class="dot ${dotClass(inst)}"></span>
       <span class="name">${esc(inst.name)}</span>
-      <span class="pill">${stateText(inst)}</span>
-      ${inst.external ? '<span class="pill">外部</span>' : ""}
-      ${inst.configured ? "" : '<span class="pill" style="color:var(--warn)">未注册</span>'}
+      <span class="pill ${dotClass(inst)}">${stateText(inst)}</span>
+      ${inst.external ? '<span class="pill external" title="由其它终端/launchd 启动，非本工具拉起">外部</span>' : ""}
+      ${inst.configured ? "" : '<span class="pill warn">未注册</span>'}
     </div>
     <div class="actions">
       <button class="icon-btn" data-act="start" ${startDisabled ? "disabled" : ""}>▶ 启动</button>
@@ -335,31 +366,46 @@ function classify(line) {
   return "";
 }
 
-function appendLogLines(lines, reset) {
-  const logEl = $("#log");
-  if (reset) logEl.innerHTML = "";
-  const pinned = $("#autoscroll").checked && logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
-  const frag = document.createDocumentFragment();
-  for (const line of lines) {
-    const div = document.createElement("div");
-    if (line) {
-      div.className = classify(line);
-      div.textContent = line;
+  function appendLogLines(lines, reset) {
+    const logEl = $("#log");
+    if (reset || logEl.querySelector(".empty")) logEl.innerHTML = "";
+    const pinned = $("#autoscroll").checked && logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+    const frag = document.createDocumentFragment();
+    for (const line of lines) {
+      const div = document.createElement("div");
+      if (line) {
+        const cls = classify(line);
+        // 时间戳恒为中性灰，只对事件语义着色，避免整行彩墙
+        const m = cls && cls !== "l-dim" ? /^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}Z): (.*)$/.exec(line) : null;
+        if (m) {
+          const ts = document.createElement("span");
+          ts.className = "l-dim";
+          ts.textContent = m[1] + ": ";
+          const body = document.createElement("span");
+          body.className = cls;
+          body.textContent = m[2];
+          div.append(ts, body);
+        } else {
+          div.className = cls;
+          div.textContent = line;
+        }
+      }
+      frag.appendChild(div);
     }
-    frag.appendChild(div);
+    logEl.appendChild(frag);
+    if (pinned || reset) logEl.scrollTop = logEl.scrollHeight;
   }
-  logEl.appendChild(frag);
-  if (pinned || reset) logEl.scrollTop = logEl.scrollHeight;
-}
 
 function renderLogFull() {
   const logEl = $("#log");
   const buf = state.logs.get(state.selected);
+  const inst = state.snap?.instances.find((i) => i.id === state.selected);
   $("#log-title").textContent = state.selected
-    ? `日志 — ${state.snap?.instances.find((i) => i.id === state.selected)?.name ?? state.selected}`
+    ? `日志 — ${inst?.name ?? state.selected}`
     : "日志（选择实例）";
-  if (!buf) { logEl.innerHTML = '<div class="empty">尚无实例</div>'; return; }
   logEl.innerHTML = "";
+  if (!inst) { logEl.innerHTML = '<div class="empty">尚无实例</div>'; return; }
+  if (!buf || buf.length === 0) { logEl.innerHTML = '<div class="empty">暂无日志</div>'; return; }
   appendLogLines(buf, false);
   logEl.scrollTop = logEl.scrollHeight;
 }
@@ -379,6 +425,7 @@ $("#btn-new").addEventListener("click", () => {
   $("#register-dlg").showModal();
 });
 $("#reg-cancel").addEventListener("click", () => $("#register-dlg").close());
+$("#dlg-close").addEventListener("click", () => $("#register-dlg").close());
 $("#register-form").addEventListener("submit", (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
@@ -389,7 +436,7 @@ $("#register-form").addEventListener("submit", (e) => {
   send({
     type: "register",
     dir: get("dir"), name: get("name"), token: get("token"), labels: get("labels"),
-    orgUrl: get("orgUrl"), workFolder: get("workFolder") || get("dir").replace(/actions-runner.*/, "gh-runner-work-5"),
+    orgUrl: get("orgUrl"), workFolder: get("workFolder"),
     tarball: get("tarball"),
   });
   progress.textContent += "已提交注册请求…\n";

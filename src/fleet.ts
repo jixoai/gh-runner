@@ -10,6 +10,7 @@
  */
 
 import { join } from "node:path";
+import { existsSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { DirTail } from "./tailer.ts";
 import { normalizeLine, parseConsoleLine, stripDiagPrefix } from "./logparse.ts";
@@ -17,10 +18,16 @@ import {
   discoverRunnerDirs,
   findListenerProcesses,
   instanceIdOf,
+  pidCwd,
   readRunnerMeta,
   type RunnerMeta,
 } from "./discover.ts";
-import { startRunner, stopProcessGroup, type SpawnedRunner } from "./supervisor.ts";
+import {
+  pidExists,
+  startRunner,
+  stopProcessGroup,
+  type SpawnedRunner,
+} from "./supervisor.ts";
 import { loadConfig, saveConfig, upsertInstance } from "./config.ts";
 import { registerRunner, type RegisterRequest } from "./register.ts";
 import type {
@@ -33,9 +40,16 @@ import type {
 } from "./types.ts";
 
 const LOG_RING_MAX = 400;
-const DEDUP_MAX = 1200;
+const DEDUP_MAX = 2400;
 const TICK_MS = 2000;
 const DEBOUNCE_MS = 200;
+
+export interface BootOptions {
+  /** 启动时自动拉起 autoStart 实例；--dry-run/--smoke 等验证模式必须传 false（保持无副作用）。 */
+  autoStart?: boolean;
+  /** 允许写回 config.json；验证模式传 false（只读）。 */
+  persist?: boolean;
+}
 
 interface Rt {
   id: string;
@@ -68,18 +82,23 @@ export class Fleet {
   #debounceTimer: NodeJS.Timeout | null = null;
   #tickTimer: NodeJS.Timeout | null = null;
   #task: FleetTask = { kind: "none", status: "ok", message: null };
+  #ticking = false;
+  #persist = true;
 
-  async boot(): Promise<void> {
+  async boot(options: BootOptions = {}): Promise<void> {
+    this.#persist = options.persist ?? true;
     this.#config = await loadConfig();
     await this.#syncInstances();
     // 先同步对账一轮：外部进程归位后，autoStart 才不会与已在跑的实例打架。
     await this.#tick();
     this.#tickTimer = setInterval(() => void this.#tick(), TICK_MS);
     this.#tickTimer.unref?.();
-    // autoStart：配置了自启且未在跑的受管实例
-    for (const rt of this.#rts.values()) {
-      if (rt.autoStart && rt.meta?.configured && rt.processState === "stopped") {
-        void this.start(rt.id);
+    if (options.autoStart ?? true) {
+      // autoStart：配置了自启且未在跑的受管实例
+      for (const rt of this.#rts.values()) {
+        if (rt.autoStart && rt.meta?.configured && rt.processState === "stopped") {
+          void this.start(rt.id);
+        }
       }
     }
   }
@@ -122,9 +141,18 @@ export class Fleet {
       return;
     }
     rt.lastError = null;
-    const spawned = startRunner(rt.dir, (stream, line) => this.#onManagedLine(rt, stream, line));
+    let spawnError: Error | null = null;
+    const spawned = startRunner(
+      rt.dir,
+      (stream, line) => this.#onManagedLine(rt, stream, line),
+      (err) => {
+        spawnError = err;
+      },
+    );
     if (!spawned) {
-      rt.lastError = `未找到 ${join(rt.dir, "run.sh")}：目录缺少 runner 程序`;
+      rt.lastError = existsSync(join(rt.dir, "run.sh"))
+        ? "run.sh 无法启动（检查执行权限/解释器）"
+        : `未找到 ${join(rt.dir, "run.sh")}：目录缺少 runner 程序`;
       this.#emit();
       return;
     }
@@ -132,16 +160,19 @@ export class Fleet {
     rt.pid = spawned.pid;
     rt.external = false;
     rt.processState = "starting";
-    spawned.child.on("exit", (code, signal) => {
+    // spawn 失败只发 error+close 不发 exit——必须用 close 收尾（exit 的超集）。
+    spawned.child.on("close", (code, signal) => {
       if (rt.child?.pid !== spawned.pid) return;
       rt.child = null;
       rt.pid = null;
       rt.processState = "stopped";
       rt.currentJob = null;
       const graceful = signal === "SIGTERM" || code === 0;
-      rt.lastError = graceful
-        ? null
-        : `进程退出 code=${code} signal=${signal ?? "none"}（详见日志）`;
+      rt.lastError = spawnError
+        ? `启动失败：${spawnError.message}`
+        : graceful
+          ? null
+          : `进程退出 code=${code} signal=${signal ?? "none"}（详见日志）`;
       this.#emitSoon();
     });
     this.#emitSoon();
@@ -151,19 +182,42 @@ export class Fleet {
     const rt = this.#rts.get(id);
     if (!rt) return;
     if (rt.processState !== "running" && rt.processState !== "starting") return;
-    if (rt.pid === null) return;
+    if (rt.pid == null) return;
     rt.processState = "stopping";
     rt.stoppingUntilMs = Date.now() + 15_000;
     this.#emit();
     const pid = rt.pid;
     const wasExternal = rt.external;
+    if (wasExternal) {
+      // pid 复用防护：终止前核对该 pid 的 cwd 仍是本实例目录（缓存 pid 可能已易主）。
+      const cwd = await pidCwd(pid);
+      if (cwd === null) {
+        if (pidExists(pid) !== "dead") {
+          // lsof 读不到（可能是 root 属主），但进程还活着：继续尝试，失败会以 EPERM 暴露。
+        } else {
+          rt.pid = null;
+          rt.external = false;
+          rt.processState = "stopped";
+          rt.currentJob = null;
+          this.#emit();
+          return;
+        }
+      } else if (cwd !== rt.dir && cwd !== (await realpath(rt.dir).catch(() => rt.dir))) {
+        rt.lastError = "停止已取消：该 pid 已不属于本实例（等待重新对账）";
+        rt.pid = null;
+        rt.external = false;
+        rt.processState = "stopped";
+        this.#emit();
+        return;
+      }
+    }
     const ok = await stopProcessGroup(pid, wasExternal ? 6000 : 8000);
     if (wasExternal) {
       // 外部进程：无 child 事件，需手动收尾。
       rt.external = false;
       rt.pid = null;
       rt.processState = ok ? "stopped" : "running";
-      if (!ok) rt.lastError = "停止失败：进程未响应 SIGTERM/SIGKILL";
+      if (!ok) rt.lastError = "停止失败：进程无响应或无权限（可能由 sudo 启动）";
       rt.currentJob = null;
     }
     this.#emit();
@@ -255,19 +309,24 @@ export class Fleet {
     const dirs = new Set<string>([...discovered, ...config.instances.map((i) => i.dir)]);
     let changed = false;
     for (const dir of dirs) {
-      const rt = this.#ensureRt(dir, true);
-      rt.meta = await readRunnerMeta(dir);
-      const cfgAuto = config.instances.find((i) => i.dir === dir || i.id === rt.id);
-      rt.autoStart = cfgAuto?.autoStart ?? false;
-      if (!cfgAuto) {
-        config.instances = upsertInstance(config, { id: rt.id, dir, autoStart: false }).instances;
-        changed = true;
-      }if (!rt.tail) {
-        rt.tail = new DirTail(join(dir, "_diag"), "Runner_");
-        rt.tail.start((lines) => this.#onDiagLines(rt, lines));
+      try {
+        const rt = this.#ensureRt(dir, true);
+        rt.meta = await readRunnerMeta(dir);
+        const cfgAuto = config.instances.find((i) => i.dir === dir || i.id === rt.id);
+        rt.autoStart = cfgAuto?.autoStart ?? false;
+        if (!cfgAuto && this.#persist) {
+          config.instances = upsertInstance(config, { id: rt.id, dir, autoStart: false }).instances;
+          changed = true;
+        }
+        if (!rt.tail) {
+          rt.tail = new DirTail(join(dir, "_diag"), "Runner_");
+          rt.tail.start((lines) => this.#onDiagLines(rt, lines));
+        }
+      } catch {
+        /* 单个坏目录跳过，不拖垮整体同步 */
       }
     }
-    if (changed) await saveConfig(config);
+    if (changed && this.#persist) await saveConfig(config);
   }
 
   #onDiagLines(rt: Rt, lines: string[]): void {
@@ -316,9 +375,9 @@ export class Fleet {
   }
 
   #pushLog(rt: Rt, line: string): void {
-    const key = line.length > 160 ? `${line.length}:${line.slice(0, 80)}` : line;
-    if (rt.seen.has(key)) return;
-    rt.seen.add(key);
+    // 整行做 key（config.sh 长输出常同前缀不同尾，截断 key 会误判重复丢行）。
+    if (rt.seen.has(line)) return;
+    rt.seen.add(line);
     if (rt.seen.size > DEDUP_MAX) {
       // 重新收缩：保留最近的（Set 迭代序=插入序）。
       rt.seen = new Set([...rt.seen].slice(-DEDUP_MAX / 2));

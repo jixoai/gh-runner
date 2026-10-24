@@ -20,16 +20,6 @@ export interface TrayActions {
   quit(): void;
 }
 
-/** 菜单栏文案：▶N 在跑数量；作业中的实例数以 ↻ 标注。 */
-export function iconTextOf(snapshot: Snapshot): string {
-  const running = snapshot.instances.filter(
-    (i) => i.processState === "running" || i.processState === "starting",
-  );
-  const busy = running.filter((i) => i.currentJob !== null).length;
-  const base = `▶${running.length}`;
-  return busy > 0 ? `${base}↻${busy}` : base;
-}
-
 function stateLabel(snapshot: Snapshot, index: number): string {
   const i = snapshot.instances[index]!;
   if (i.currentJob) return `↻ ${i.currentJob.job}`;

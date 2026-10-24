@@ -35,6 +35,9 @@ export class UiHost {
   /** 每实例已推送的日志绝对计数（logTotal），0=从头全量。 */
   #logOffsets = new Map<string, number>();
   #seq = 0;
+  /** 单飞守卫：hello 全量重推与去抖推送并发交错会让同一批日志行重复送达页面。 */
+  #pushInFlight = false;
+  #pushPending = false;
 
   constructor(
     private readonly fleet: Fleet,
@@ -119,19 +122,32 @@ export class UiHost {
     const win = this.#window;
     const snap = this.#lastSnapshot;
     if (!win || !snap || win.connectionDead) return;
-    const summary: UiPush = {
-      kind: "summary",
-      seq: ++this.#seq,
-      now: snap.now,
-      task: snap.task,
-      instances: snap.instances.map((inst) => {
-        const { log: _log, ...rest } = inst;
-        return rest satisfies Omit<InstanceView, "log">;
-      }),
-    };
-    await this.#evaluate(JSON.stringify(summary));
-    for (const inst of snap.instances) {
-      await this.#pushLogDelta(win, inst.id);
+    if (this.#pushInFlight) {
+      this.#pushPending = true;
+      return;
+    }
+    this.#pushInFlight = true;
+    try {
+      const summary: UiPush = {
+        kind: "summary",
+        seq: ++this.#seq,
+        now: snap.now,
+        task: snap.task,
+        instances: snap.instances.map((inst) => {
+          const { log: _log, ...rest } = inst;
+          return rest satisfies Omit<InstanceView, "log">;
+        }),
+      };
+      await this.#evaluate(JSON.stringify(summary));
+      for (const inst of snap.instances) {
+        await this.#pushLogDelta(win, inst.id);
+      }
+    } finally {
+      this.#pushInFlight = false;
+      if (this.#pushPending && this.#window) {
+        this.#pushPending = false;
+        this.#flush();
+      }
     }
   }
 
@@ -146,21 +162,36 @@ export class UiHost {
     const available = Math.min(wanted, view.log.length);
     const allLines = view.log.slice(view.log.length - available);
     const truncated = available < wanted;
-    // 分包推送，单次 evaluate 控制在 KB 级。
-    const CHUNK = 120;
-    for (let i = 0; i < allLines.length; i += CHUNK) {
-      const lines = allLines.slice(i, i + CHUNK);
+    // 按字节分包（长堆栈行可达数 KB，按行数分包可能越过 evaluate 体积上限）。
+    const chunks: string[][] = [];
+    let cur: string[] = [];
+    let bytes = 0;
+    for (const line of allLines) {
+      const b = Buffer.byteLength(line, "utf8") + 1;
+      if (bytes + b > 24_000 && cur.length > 0) {
+        chunks.push(cur);
+        cur = [];
+        bytes = 0;
+      }
+      cur.push(line);
+      bytes += b;
+    }
+    if (cur.length > 0) chunks.push(cur);
+
+    let offset = total - allLines.length;
+    for (const lines of chunks) {
       const msg: UiPush = {
         kind: "log",
         seq: ++this.#seq,
         id,
-        from: truncated && i === 0 ? 0 : total - allLines.length + i,
-        truncated: truncated && i === 0,
+        from: truncated && offset === total - allLines.length ? 0 : offset,
+        truncated: truncated && offset === total - allLines.length,
         lines,
       };
       const ok = await this.#evaluate(JSON.stringify(msg));
       if (!ok) return; // offset 不前移，下轮重试
-      this.#logOffsets.set(id, total - allLines.length + i + lines.length);
+      offset += lines.length;
+      this.#logOffsets.set(id, offset);
     }
   }
 
@@ -201,9 +232,9 @@ export class UiHost {
   async #handle(cmd: UiCommand): Promise<void> {
     switch (cmd.type) {
       case "hello": {
-        // 全量重推：offset 清零后 summary + 每实例日志从头推送。
+        // 全量重推：offset 清零后走统一 flush 路径（与在途推送单飞串行，杜绝交错重复）。
         this.#logOffsets.clear();
-        await this.#doPush();
+        this.#flush();
         break;
       }
       case "ack": {

@@ -83,6 +83,8 @@
   const demo = (window.__demo = {
     task: { kind: "none", status: "ok", message: null },
     command(cmd) {
+      // hello/ack 是页面回声，不能触发 sink——否则 ack→sink→ack 无限递归（栈溢出，日志通道全断）。
+      if (cmd.type === "ack" || cmd.type === "hello") return;
       const inst = instances.find((i) => i.id === cmd.id);
       if (cmd.type === "start" && inst) {
         inst.processState = "running";
@@ -117,16 +119,15 @@
         const t = setInterval(() => {
           if (i < lines.length) {
             demo.task = { kind: "register", status: "running", message: lines[i++] };
-            const dirInst = instances.find((x) => x.id === "actions-runner-04");
-            addLog(dirInst, demo.task.message);
           } else {
             clearInterval(t);
-            const dirInst = instances.find((x) => x.id === "actions-runner-04");
-            dirInst.configured = true;
-            dirInst.name = cmd.name || "mac-ext-05";
-            dirInst.dir = cmd.dir;
-            demo.task = { kind: "register", status: "ok", message: `${dirInst.name} 注册成功（演示）` };
-            demo.command({ type: "start", id: dirInst.id });
+            // 与真实语义一致：注册目标必须是新目录 → 生成全新实例，而不是顶掉既有实例。
+            const fresh = mk("actions-runner-5", cmd.name || "mac-ext-05", {});
+            fresh.dir = cmd.dir || fresh.dir;
+            fresh.processState = "stopped";
+            instances.push(fresh);
+            demo.task = { kind: "register", status: "ok", message: `${fresh.name} 注册成功（演示）` };
+            demo.command({ type: "start", id: fresh.id });
           }
           sink();
         }, 700);

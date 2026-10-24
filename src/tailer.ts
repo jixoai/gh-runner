@@ -35,6 +35,8 @@ export class DirTail {
   #activeFile: string | null = null;
   #offset = 0;
   #partial = "";
+  /** 首附/轮转从文件中部（64KB 窗口）起步时，首个片段是残行，须丢弃到首个换行。 */
+  #skipFirstPartial = false;
   #polling = false;
 
   constructor(dir: string, prefix: string, options: FileTailerOptions = {}) {
@@ -103,6 +105,7 @@ export class DirTail {
         this.#activeFile = path;
         this.#offset = start;
         this.#partial = "";
+        this.#skipFirstPartial = start > 0;
       }
 
       const st = await stat(path).catch(() => null);
@@ -119,7 +122,12 @@ export class DirTail {
         const buffer = Buffer.alloc(length);
         await handle.read(buffer, 0, length, this.#offset);
         this.#offset = st.size;
-        const text = this.#partial + buffer.toString("utf8");
+        let text = this.#partial + buffer.toString("utf8");
+        if (this.#skipFirstPartial) {
+          const firstNl = text.indexOf("\n");
+          text = firstNl >= 0 ? text.slice(firstNl + 1) : "";
+          this.#skipFirstPartial = false;
+        }
         const lines = text.split("\n");
         this.#partial = lines.pop() ?? "";
         const complete = lines.filter((l) => l.trim().length > 0);

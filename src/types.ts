@@ -8,12 +8,7 @@
  */
 
 /** 实例进程生命周期（supervisor 视角）。external 表示进程在跑但不是本工具拉起的。 */
-export type ProcessState =
-  | "stopped"
-  | "starting"
-  | "running"
-  | "stopping"
-  | "configuring";
+export type ProcessState = "stopped" | "starting" | "running" | "stopping";
 
 /** 一次作业（job）的终态，取自 Runner 日志 `completed with result:` 后的原文。 */
 export type JobOutcome =

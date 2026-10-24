@@ -146,7 +146,12 @@ async function main(): Promise<void> {
     return;
   }
   const fleet = new Fleet();
-  await fleet.boot();
+  // 验证模式（--dry-run/--smoke）绝不产生副作用：不 autoStart、不写配置。
+  await fleet.boot(
+    mode === "--dry-run" || mode === "--smoke"
+      ? { autoStart: false, persist: false }
+      : {},
+  );
 
   if (mode === "--dry-run") {
     const iterations = Number(process.argv[3] ?? "3");

@@ -37,12 +37,20 @@
    因此作业状态机只吃这一路；受管实例的 stdout 仅用于即时回显与启动确认，经归一化去重合流。
 2. **外部进程对账**：每 2s `pgrep -f "Runner.Listener run"` + `lsof -d cwd`，双侧 realpath 归一
    （/var ↔ /private/var）后按 cwd 匹配实例目录。工具重启后自动重连 detached 幸存的受管实例。
+   停止外部实例前对该 pid 复核 cwd（防 pid 复用误杀）。
 3. **推送协议（实测教训）**：单次 evaluate ~100KB 全量快照在 WKWebView 路径上**静默失败**
-   （promise resolve 但页面未执行）。故拆为 `summary`（KB 级）+ `log` 增量（≤120 行/包）双通道；
-   页面 hello → 宿主 offset 清零全量重推；ack 单调记录（smoke 以此判定闭环）。
-4. **停止语义**：受管实例杀进程组（TERM→8s→KILL）；外部实例 TERM 其 Listener pid（等价于
-   终端里 Ctrl-C）。作业中强停会让 GitHub 把作业标记失败——UI 在此情形弹确认。
-5. **受管 runner detached**：工具退出不杀 runner（与"终端里跑"等价），避免退出动作误伤在飞作业。
+   （promise resolve 但页面未执行）。故拆为 `summary`（KB 级）+ `log` 增量（按字节 ≤24KB/包）双通道；
+   推送单飞串行（hello 与去抖推送并发交错会重复投递）；页面 hello → 宿主 offset 清零全量重推；
+   ack 单调记录（smoke 以此判定闭环）。
+4. **spawn 失败三律**（对抗式复核实证）：error 事件必须先于 pid 判空挂监听（否则 uncaught 崩托盘）；
+   spawn 失败只发 error+close 不发 exit（必须用 close 收尾，否则永久卡「启动中」）；
+   config.json 形状损坏必须容错（合法 JSON + 缺字段即 brick 启动）。
+5. **停止语义**：受管实例杀进程组（TERM→8s→KILL）；外部实例 TERM 其 Listener pid（等价于
+   终端里 Ctrl-C），pid 复用核验不过即放弃。kill(2) 区分 ESRCH/EPERM，EPERM=存活无权限=失败
+   （sudo 启动的 runner 会得到明确错误而非假成功）。作业中强停会让 GitHub 把作业标记失败——
+   UI 在此情形弹确认。
+6. **受管 runner detached**：工具退出不杀 runner（与"终端里跑"等价），下次启动自动重连。
+   验证模式（--dry-run/--smoke）以 `boot({autoStart:false, persist:false})` 保证零副作用。
 
 ## 文件意图
 

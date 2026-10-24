@@ -111,3 +111,19 @@ export function instanceIdOf(dir: string, _cfg?: InstanceConfig): string {
   const parts = dir.split("/").filter(Boolean);
   return parts[parts.length - 1] ?? dir;
 }
+
+/** 读取单个 pid 的 cwd（解析失败/无权限返回 null）。供停止前的 pid 复用核验。 */
+export async function pidCwd(pid: number): Promise<string | null> {
+  try {
+    const { stdout } = await exec("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"]);
+    for (const line of stdout.split("\n")) {
+      if (line.startsWith("n/")) {
+        const raw = line.slice(1);
+        return await realpath(raw).catch(() => raw);
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
