@@ -110,7 +110,7 @@
   #register-form { display: flex; flex-direction: column; min-height: 0; flex: 1; }
   #register-form .dlg-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
   #register-form .dlg-foot { flex: 0 0 auto; }
-  .dlg-body { padding: 16px 18px; overflow-y: auto; flex: 1; min-height: 0; }
+  .dlg-body { padding: 16px 18px 14px; overflow-y: auto; flex: 1; min-height: 0; }
   .dlg-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px 0; }
   .dlg-head h2 { font-size: 15px; }
   .dlg-head .dlg-close {
@@ -132,11 +132,11 @@
     background: var(--bg); border-radius: 7px; padding: 8px; margin-top: 8px; display: none; user-select: text;
   }
   #toast {
-    position: fixed; top: 48px; left: 50%; transform: translateX(-50%) translateY(-12px);
+    position: fixed; top: 52px; right: 16px; transform: translateY(-12px);
     background: var(--ink); color: var(--bg); border-radius: 9px; padding: 7px 16px; font-size: 12px;
-    opacity: 0; pointer-events: none; transition: all .25s; max-width: 80%; z-index: 50;
+    opacity: 0; pointer-events: none; transition: all .25s; max-width: 46%; z-index: 50;
   }
-  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #toast.show { opacity: 1; transform: translateY(0); }
   .scroll-thin { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--ink-2) 45%, transparent) transparent; }
   .cards::-webkit-scrollbar, #log::-webkit-scrollbar, #reg-progress::-webkit-scrollbar { width: 6px; height: 6px; }
   .cards::-webkit-scrollbar-thumb, #log::-webkit-scrollbar-thumb, #reg-progress::-webkit-scrollbar-thumb {
