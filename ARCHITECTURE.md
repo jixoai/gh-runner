@@ -1,0 +1,73 @@
+# Runner Fleet — 架构规格
+
+> 原始需求（2026-10-24）：多开 GitHub self-hosted runner（本机已有 mac-ext-01..04），
+> 做一个挂在托盘里的管理工具——表单配置后可把 runner 当实例启动/关闭；
+> 根据运行日志实时分析最近的一个动作是成功还是失败；界面实时响应和显示。
+
+## 拓扑
+
+```
+┌─────────────────────────── node 单进程（dist/main.mjs）───────────────────────────┐
+│                                                                                   │
+│  ┌── Fleet（领域编排，无托盘依赖，可无头测试）──┐      ┌── 投影 ──────────────┐   │
+│  │                                             │      │ TrayProjection       │   │
+│  │  config.json ◄─► #syncInstances()           │      │  图标文案 ▶N↻M       │   │
+│  │                 │ 磁盘发现 ∪ 配置实例        │      │  tooltip            │   │
+│  │                 ▼                            │      │  菜单（直达实例）    │   │
+│  │  Rt{meta,processState,currentJob,           │──┬──►│ UiHost(appMode 窗口)│   │
+│  │      lastResult,log环形缓冲,logTotal}        │  │   │  summary 推送        │   │
+│  │     ▲            ▲                           │  │   │  log 增量分包推送    │   │
+│  │     │            │                           │  │   └──────────┬──────────┘   │
+│  │  ┌──┴───┐   ┌────┴─────┐                     │  │              │ evaluate     │
+│  │  │tailer│   │supervisor│                     │  │      ┌───────▼────────┐     │
+│  │  │(diag)│   │ spawn/kill│                    │  │      │ WKWebView 页面 │     │
+│  │  └──┬───┘   └────┬─────┘                     │  │      │ (vanilla UI)   │     │
+│  └─────┼────────────┼───────────────────────────┘  │      └───────┬────────┘     │
+│        │            │                              │              │ ipc          │
+└────────┼────────────┼──────────────────────────────┼──────────────┼──────────────┘
+         ▼            ▼                              ▼              ▼
+  _diag/Runner_*.log  run.sh(进程组)              菜单栏图标      navigator.opentray.ipc
+  (轮转感知 tail)     detached：工具退出仍存活     (macOS 状态栏)   hello/ack/start/stop/register
+```
+
+## 关键判定
+
+1. **日志是权威事件源**：`_diag/Runner_*.log` 的 `WRITE LINE` 控制台行（`Running job: X` /
+   `Job X completed with result: Y` / `Listening for Jobs`）对「外部启动的 runner」同样生效，
+   因此作业状态机只吃这一路；受管实例的 stdout 仅用于即时回显与启动确认，经归一化去重合流。
+2. **外部进程对账**：每 2s `pgrep -f "Runner.Listener run"` + `lsof -d cwd`，双侧 realpath 归一
+   （/var ↔ /private/var）后按 cwd 匹配实例目录。工具重启后自动重连 detached 幸存的受管实例。
+3. **推送协议（实测教训）**：单次 evaluate ~100KB 全量快照在 WKWebView 路径上**静默失败**
+   （promise resolve 但页面未执行）。故拆为 `summary`（KB 级）+ `log` 增量（≤120 行/包）双通道；
+   页面 hello → 宿主 offset 清零全量重推；ack 单调记录（smoke 以此判定闭环）。
+4. **停止语义**：受管实例杀进程组（TERM→8s→KILL）；外部实例 TERM 其 Listener pid（等价于
+   终端里 Ctrl-C）。作业中强停会让 GitHub 把作业标记失败——UI 在此情形弹确认。
+5. **受管 runner detached**：工具退出不杀 runner（与"终端里跑"等价），避免退出动作误伤在飞作业。
+
+## 文件意图
+
+| 文件 | 正交意图 |
+|---|---|
+| types.ts | 领域模型唯一类型源（无 IO） |
+| logparse.ts | 纯函数：控制台行 → 作业事件 |
+| tailer.ts | 追加式文件跟随（stat 轮询，网络卷可靠） |
+| discover.ts | .runner 元数据（含 BOM）、目录发现、进程对账 |
+| supervisor.ts | run.sh 进程组拉起/终止 |
+| config.ts | 工具配置持久化（~/Library/Application Support/runner-fleet） |
+| register.ts | 注册流水线（解包→去隔离→config.sh→校验） |
+| fleet.ts | 实例注册表 + 进程/日志两面编排 + 快照发射 |
+| tray.ts | 快照 → 托盘图标/tooltip/菜单投影 |
+| window.ts | appMode 窗口 + summary/log 双通道推送 + 命令路由 |
+| main.ts | 组装、生命周期、--dry-run/--smoke/--probe 验证模式 |
+| ui/index.html | 实例卡 + 实时日志面板 + 注册表单（无桥时进入演示模式） |
+
+## 验证矩阵
+
+| 门 | 命令 | 覆盖 |
+|---|---|---|
+| typecheck | `pnpm typecheck` | 类型安全 |
+| 单测 | `pnpm test` | logparse（真实日志行样本）+ Fleet E2E（spawn→解析→停止→外部对账） |
+| 真实数据 | `node dist/main.mjs --dry-run 2` | 4 台真实 runner 的发现/状态/最近结果（只读） |
+| 真实闭环 | `node dist/main.mjs --smoke` | 真实托盘+窗口，hello/ack 协议闭环（/tmp/runner-fleet-smoke.json） |
+| 桥探针 | `node dist/main.mjs --probe` | 页面桥真实形态取证（/tmp/runner-fleet-probe.json） |
+| 视觉 | 浏览器演示模式 + 实机截图 | vision 子代理判读 |

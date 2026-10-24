@@ -1,0 +1,439 @@
+<!doctype html>
+<!--
+原始需求（2026-10-24）：配置必要表单后即可把 runner 当实例启动/关闭；
+按运行日志实时分析最近动作成败；界面实时响应。
+正交意图：
+1. 快照渲染：实例卡（状态/当前作业/最近结果/启停按钮）+ 实时日志面板（选中实例）。
+2. 命令上行：hello/ack/start/stop/register/set-auto-start/open-diag → navigator.opentray.ipc。
+3. 演示模式：无宿主桥（普通浏览器打开）时以模拟数据驱动同一套渲染与交互，供走查与截图。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Runner Fleet</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f5f7; --pane: #ffffff; --line: rgba(0,0,0,.1); --ink: #1d1d1f; --ink-2: #6e6e73;
+    --ok: #34c759; --bad: #ff3b30; --run: #0a84ff; --warn: #ff9f0a; --idle: #8e8e93;
+    --chip: rgba(0,0,0,.05); --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1e1e20; --pane: #28282a; --line: rgba(255,255,255,.12); --ink: #f5f5f7; --ink-2: #98989d;
+      --chip: rgba(255,255,255,.08);
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+    background: var(--bg); color: var(--ink); display: flex; flex-direction: column;
+    overflow: hidden; user-select: none;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+    border-bottom: 1px solid var(--line); flex: none;
+  }
+  header h1 { font-size: 15px; font-weight: 700; letter-spacing: .2px; }
+  #summary { color: var(--ink-2); flex: 1; }
+  button {
+    font: inherit; border: 1px solid var(--line); background: var(--pane); color: var(--ink);
+    border-radius: 7px; padding: 4px 12px; cursor: pointer; transition: opacity .15s, transform .1s;
+  }
+  button:hover { filter: brightness(1.06); }
+  button:active { transform: scale(.97); }
+  button[disabled] { opacity: .45; cursor: default; pointer-events: none; }
+  button.primary { background: var(--run); border-color: transparent; color: #fff; font-weight: 600; }
+  button.danger  { color: var(--bad); }
+  main { flex: 1; display: grid; grid-template-columns: minmax(380px, 11fr) minmax(320px, 9fr); min-height: 0; }
+  .cards { overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .card {
+    background: var(--pane); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px;
+    display: grid; grid-template-columns: 1fr auto; gap: 8px 10px; cursor: pointer;
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .card.selected { border-color: var(--run); box-shadow: 0 0 0 3px color-mix(in srgb, var(--run) 22%, transparent); }
+  .card .name-row { display: flex; align-items: center; gap: 8px; }
+  .card .name { font-weight: 700; font-size: 14px; }
+  .card .meta { color: var(--ink-2); font-size: 11px; grid-column: 1 / -1; }
+  .pill {
+    font-size: 11px; padding: 1px 8px; border-radius: 99px; background: var(--chip); color: var(--ink-2);
+    display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--idle); flex: none; }
+  .dot.running { background: var(--ok); }
+  .dot.busy { background: var(--run); animation: pulse 1.2s ease-in-out infinite; }
+  .dot.stopping, .dot.starting { background: var(--warn); }
+  .dot.stopped { background: var(--idle); }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .jobline { font-size: 12px; color: var(--ink-2); grid-column: 1 / -1; min-height: 18px; }
+  .jobline b { color: var(--ink); }
+  .jobline .ok { color: var(--ok); } .jobline .bad { color: var(--bad); }
+  .actions { display: flex; gap: 6px; align-items: center; }
+  .actions .icon-btn { padding: 4px 8px; font-size: 12px; }
+  .switch { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-2); font-size: 11px; }
+  .logpane { border-left: 1px solid var(--line); display: flex; flex-direction: column; min-width: 0; background: var(--pane); }
+  .logpane-head {
+    display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line);
+    color: var(--ink-2); font-size: 12px; flex: none;
+  }
+  .logpane-head .log-title { font-weight: 600; color: var(--ink); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #log {
+    flex: 1; overflow-y: auto; padding: 10px 12px; font-family: var(--mono); font-size: 11px;
+    line-height: 1.5; white-space: pre-wrap; word-break: break-all; user-select: text;
+  }
+  #log .l-ok { color: var(--ok); } #log .l-bad { color: var(--bad); } #log .l-run { color: var(--run); }
+  #log .l-dim { color: var(--ink-2); }
+  .empty { color: var(--ink-2); text-align: center; padding: 40px 0; }
+  dialog {
+    border: 1px solid var(--line); border-radius: 14px; background: var(--pane); color: var(--ink);
+    padding: 0; width: 460px; max-width: 92vw;
+  }
+  dialog::backdrop { background: rgba(0,0,0,.35); backdrop-filter: blur(2px); }
+  .dlg-body { padding: 16px 18px; }
+  .dlg-body h2 { font-size: 15px; margin-bottom: 12px; }
+  .field { margin-bottom: 10px; display: grid; gap: 3px; }
+  .field label { font-size: 11px; color: var(--ink-2); }
+  .field input {
+    font: inherit; padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px;
+    background: var(--bg); color: var(--ink); width: 100%;
+  }
+  .field input:focus { outline: 2px solid color-mix(in srgb, var(--run) 55%, transparent); border-color: transparent; }
+  .field .hint { font-size: 10.5px; color: var(--ink-2); }
+  .dlg-foot { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 18px; border-top: 1px solid var(--line); }
+  #reg-progress {
+    font-family: var(--mono); font-size: 10.5px; max-height: 130px; overflow-y: auto; white-space: pre-wrap;
+    background: var(--bg); border-radius: 7px; padding: 8px; margin-top: 8px; display: none; user-select: text;
+  }
+  #toast {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--ink); color: var(--bg); border-radius: 9px; padding: 7px 16px; font-size: 12px;
+    opacity: 0; pointer-events: none; transition: all .25s; max-width: 80%;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .scroll-thin { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--ink-2) 45%, transparent) transparent; }
+  .cards::-webkit-scrollbar, #log::-webkit-scrollbar, #reg-progress::-webkit-scrollbar { width: 6px; height: 6px; }
+  .cards::-webkit-scrollbar-thumb, #log::-webkit-scrollbar-thumb, #reg-progress::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--ink-2) 45%, transparent); border-radius: 99px;
+  }
+  .cards::-webkit-scrollbar-track, #log::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Runner Fleet</h1>
+  <div id="summary">连接中…</div>
+  <button class="primary" id="btn-new">＋ 注册新实例</button>
+</header>
+<main>
+  <section id="cards" class="cards scroll-thin"></section>
+  <section class="logpane">
+    <div class="logpane-head">
+      <span class="log-title" id="log-title">日志（选择实例）</span>
+      <label class="switch"><input type="checkbox" id="autoscroll" checked> 自动滚动</label>
+      <button class="icon-btn" id="btn-diag" title="在 Finder 中打开 _diag">_diag</button>
+    </div>
+    <pre id="log" class="scroll-thin"></pre>
+  </section>
+</main>
+
+<dialog id="register-dlg">
+  <form id="register-form" method="dialog">
+    <div class="dlg-body">
+      <h2>注册新 runner 实例</h2>
+      <div class="field">
+        <label>实例目录（必须为空目录）</label>
+        <input name="dir" placeholder="/Volumes/bnqkl/Users/kzf/actions-runner-5" required>
+      </div>
+      <div class="field">
+        <label>实例名称</label>
+        <input name="name" placeholder="mac-ext-05" required>
+      </div>
+      <div class="field">
+        <label>注册 Token（org 设置页生成，一次性）</label>
+        <input name="token" type="password" placeholder="Axxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" required>
+        <span class="hint">获取：https://github.com/organizations/jixoai/settings/actions/runners/new</span>
+      </div>
+      <div class="field">
+        <label>Labels</label>
+        <input name="labels" value="self-hosted,macOS,ARM64">
+      </div>
+      <div class="field">
+        <label>GitHub org URL</label>
+        <input name="orgUrl" value="https://github.com/jixoai">
+      </div>
+      <div class="field">
+        <label>Work 目录（独立于其它实例，避免缓存互踩）</label>
+        <input name="workFolder" placeholder="/Volumes/bnqkl/Users/kzf/gh-runner-work-5">
+      </div>
+      <div class="field">
+        <label>分发包（留空自动探测 actions-runner-osx-*.tar.gz）</label>
+        <input name="tarball" placeholder="自动探测">
+      </div>
+      <pre id="reg-progress" class="scroll-thin"></pre>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" id="reg-cancel">取消</button>
+      <button type="submit" class="primary" id="reg-submit">注册并启动</button>
+    </div>
+  </form>
+</dialog>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $ = (sel) => document.querySelector(sel);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const state = { snap: null, selected: null, logs: new Map(), boot: Date.now() };
+
+/* ---------- 上行通道 ---------- */
+function send(cmd) {
+  const ipc = navigator.opentray && navigator.opentray.ipc;
+  if (ipc) void ipc.postMessage(cmd);
+  else demoCommand(cmd);
+}
+
+/* ---------- 推送接收（宿主 evaluate 注入；summary 与 log 增量双通道） ---------- */
+window.__rfSink = (msg) => {
+  if (msg.kind === "summary") {
+    state.snap = msg;
+    render();
+  } else if (msg.kind === "log") {
+    let buf = state.logs.get(msg.id);
+    if (!buf) { buf = []; state.logs.set(msg.id, buf); }
+    if (msg.truncated) buf.length = 0;
+    for (const line of msg.lines) buf.push(line);
+    if (buf.length > 800) buf.splice(0, buf.length - 600);
+    if (msg.id === state.selected) appendLogLines(msg.lines, msg.truncated);
+  }
+  send({ type: "ack", seq: msg.seq });
+};
+
+/* ---------- 渲染 ---------- */
+function dotClass(inst) {
+  if (inst.currentJob && inst.processState === "running") return "busy";
+  return inst.processState === "running" ? "running" : inst.processState;
+}
+function stateText(inst) {
+  if (inst.currentJob) return "作业中";
+  const map = { running: "空闲", stopped: "已停止", starting: "启动中…", stopping: "停止中…", configuring: "配置中…" };
+  return map[inst.processState] || inst.processState;
+}
+function fmtDuration(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return s + "s";
+  const m = Math.floor(s / 60);
+  return m + "m" + String(s % 60).padStart(2, "0") + "s";
+}
+function fmtAgo(iso) {
+  return fmtDuration(Math.max(0, Date.now() - Date.parse(iso))) + " 前";
+}
+function outcomeBadge(run) {
+  const ok = run.outcome === "Succeeded" || run.outcome === "SucceededWithIssues";
+  const cls = ok ? "ok" : "bad";
+  const mark = ok ? "✔" : "✘";
+  return `<span class="${cls}">${mark} ${esc(run.job)} → ${esc(run.outcome)}（${fmtDuration(run.durationMs)}，${fmtAgo(run.at)}）</span>`;
+}
+
+function render() {
+  const snap = state.snap;
+  if (!snap) return;
+  const prevSelected = state.renderedSelected;
+  const running = snap.instances.filter((i) => i.processState === "running" || i.processState === "starting").length;
+  const busy = snap.instances.filter((i) => i.currentJob).length;
+  $("#summary").textContent = `${snap.instances.length} 实例 · ${running} 在跑 · ${busy} 作业中` +
+    (snap.task.kind === "register" && snap.task.status === "running" ? " · 注册进行中" : "");
+  if (snap.task.kind === "register") toastForTask(snap.task);
+
+  if (state.selected && !snap.instances.some((i) => i.id === state.selected)) state.selected = null;
+  if (!state.selected && snap.instances.length > 0) state.selected = snap.instances[0].id;
+
+  const cards = $("#cards");
+  const seen = new Set();
+  for (const inst of snap.instances) {
+    seen.add(inst.id);
+    let card = cards.querySelector(`[data-id="${CSS.escape(inst.id)}"]`);
+    const sig = JSON.stringify([inst.processState, inst.external, inst.currentJob, inst.lastResult, inst.lastError, inst.autoStart, inst.configured]);
+    if (!card) {
+      card = document.createElement("div");
+      card.className = "card";
+      card.dataset.id = inst.id;
+      card.addEventListener("click", () => selectInstance(inst.id));
+      cards.appendChild(card);
+      card.dataset.sig = "";
+    }
+    if (card.dataset.sig !== sig) {
+      card.dataset.sig = sig;
+      card.innerHTML = cardHtml(inst);
+      wireCard(card, inst);
+    }
+    card.classList.toggle("selected", inst.id === state.selected);
+  }
+  for (const el of [...cards.children]) if (!seen.has(el.dataset.id)) el.remove();
+  if (state.selected !== prevSelected) renderLogFull();
+  state.renderedSelected = state.selected;
+}
+
+function cardHtml(inst) {
+  const job = inst.currentJob
+    ? `作业中 <b>${esc(inst.currentJob.job)}</b>（已运行 <span class="elapsed" data-start="${inst.currentJob.startedAt}">${fmtDuration(Date.now() - Date.parse(inst.currentJob.startedAt))}</span>）`
+    : inst.lastResult
+      ? `最近动作 ${outcomeBadge(inst.lastResult)}`
+      : "暂无作业记录";
+  const err = inst.lastError ? `<div class="jobline" style="color:var(--bad)">⚠ ${esc(inst.lastError)}</div>` : "";
+  const startDisabled = inst.processState !== "stopped" || !inst.configured;
+  const stopDisabled = inst.processState !== "running" && inst.processState !== "starting";
+  return `
+    <div class="name-row">
+      <span class="dot ${dotClass(inst)}"></span>
+      <span class="name">${esc(inst.name)}</span>
+      <span class="pill">${stateText(inst)}</span>
+      ${inst.external ? '<span class="pill">外部</span>' : ""}
+      ${inst.configured ? "" : '<span class="pill" style="color:var(--warn)">未注册</span>'}
+    </div>
+    <div class="actions">
+      <button class="icon-btn" data-act="start" ${startDisabled ? "disabled" : ""}>▶ 启动</button>
+      <button class="icon-btn danger" data-act="stop" ${stopDisabled ? "disabled" : ""}>■ 停止</button>
+      <label class="switch" title="工具启动时自动拉起该实例">
+        <input type="checkbox" data-act="autostart" ${inst.autoStart ? "checked" : ""}>自启
+      </label>
+    </div>
+    <div class="meta">#${inst.agentId ?? "—"} · ${esc(inst.dir)}</div>
+    <div class="jobline">${job}</div>${err}`;
+}
+
+function wireCard(card, inst) {
+  card.querySelector('[data-act="start"]').addEventListener("click", (e) => {
+    e.stopPropagation();
+    e.target.disabled = true; e.target.textContent = "启动中…";
+    send({ type: "start", id: inst.id });
+  });
+  card.querySelector('[data-act="stop"]').addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (inst.currentJob && !confirm(`「${inst.name}」正在作业 ${inst.currentJob.job}。\n强制停止会把该作业标记为失败。确定停止？`)) return;
+    e.target.disabled = true; e.target.textContent = "停止中…";
+    send({ type: "stop", id: inst.id });
+  });
+  card.querySelector('[data-act="autostart"]').addEventListener("change", (e) => {
+    send({ type: "set-auto-start", id: inst.id, value: e.target.checked });
+  });
+}
+
+function selectInstance(id) {
+  state.selected = id;
+  render();
+  renderLogFull();
+}
+
+function classify(line) {
+  if (/completed with result: (Succeeded|SucceededWithIssues|PartiallySucceeded)/.test(line)) return "l-ok";
+  if (/completed with result: (Failed|Canceled)/.test(line)) return "l-bad";
+  if (/Running job:/.test(line)) return "l-run";
+  if (/^\$|✔|✘/.test(line.trim())) return "l-dim";
+  return "";
+}
+
+function appendLogLines(lines, reset) {
+  const logEl = $("#log");
+  if (reset) logEl.innerHTML = "";
+  const pinned = $("#autoscroll").checked && logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40;
+  const frag = document.createDocumentFragment();
+  for (const line of lines) {
+    const div = document.createElement("div");
+    if (line) {
+      div.className = classify(line);
+      div.textContent = line;
+    }
+    frag.appendChild(div);
+  }
+  logEl.appendChild(frag);
+  if (pinned || reset) logEl.scrollTop = logEl.scrollHeight;
+}
+
+function renderLogFull() {
+  const logEl = $("#log");
+  const buf = state.logs.get(state.selected);
+  $("#log-title").textContent = state.selected
+    ? `日志 — ${state.snap?.instances.find((i) => i.id === state.selected)?.name ?? state.selected}`
+    : "日志（选择实例）";
+  if (!buf) { logEl.innerHTML = '<div class="empty">尚无实例</div>'; return; }
+  logEl.innerHTML = "";
+  appendLogLines(buf, false);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+/* 作业已运行时长：本地 1s 心跳，只改文本节点，不整体重渲染 */
+setInterval(() => {
+  document.querySelectorAll(".elapsed").forEach((el) => {
+    el.textContent = fmtDuration(Date.now() - Date.parse(el.dataset.start));
+  });
+}, 1000);
+
+/* ---------- 注册表单 ---------- */
+$("#btn-new").addEventListener("click", () => {
+  $("#reg-progress").style.display = "none";
+  $("#reg-progress").textContent = "";
+  $("#reg-submit").disabled = false;
+  $("#register-dlg").showModal();
+});
+$("#reg-cancel").addEventListener("click", () => $("#register-dlg").close());
+$("#register-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const get = (k) => String(fd.get(k) ?? "").trim();
+  const progress = $("#reg-progress");
+  progress.style.display = "block";
+  $("#reg-submit").disabled = true;
+  send({
+    type: "register",
+    dir: get("dir"), name: get("name"), token: get("token"), labels: get("labels"),
+    orgUrl: get("orgUrl"), workFolder: get("workFolder") || get("dir").replace(/actions-runner.*/, "gh-runner-work-5"),
+    tarball: get("tarball"),
+  });
+  progress.textContent += "已提交注册请求…\n";
+});
+
+let toastTimer = null;
+function toast(msg) {
+  const el = $("#toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 3500);
+}
+let lastTaskAnnounced = "";
+function toastForTask(task) {
+  const key = task.kind + task.status + (task.message ?? "");
+  if (key === lastTaskAnnounced) return;
+  lastTaskAnnounced = key;
+  if (task.status === "ok") { toast("✔ " + (task.message ?? "完成")); $("#register-dlg").close(); }
+  else if (task.status === "error") toast("✘ " + (task.message ?? "失败"));
+  else if (task.message) {
+    const p = $("#reg-progress");
+    p.textContent += task.message + "\n";
+    p.scrollTop = p.scrollHeight;
+    if (!$("#register-dlg").open) $("#register-dlg").showModal();
+  }
+}
+
+$("#btn-diag").addEventListener("click", () => {
+  if (state.selected) send({ type: "open-diag", id: state.selected });
+});
+
+/* ---------- 演示模式（无宿主桥的普通浏览器） ---------- */
+function demoCommand(cmd) {
+  window.__demo && window.__demo.command(cmd);
+}
+if (!(navigator.opentray && navigator.opentray.ipc)) {
+  const script = document.createElement("script");
+  script.src = "./demo.js";
+  script.onerror = () => { $("#summary").textContent = "（未连接宿主）"; };
+  document.head.appendChild(script);
+}
+
+send({ type: "hello" });
+</script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+{
+  "agentId": 999,
+  "agentName": "mock-ext-99",
+  "poolId": 1,
+  "poolName": "Default",
+  "gitHubUrl": "https://github.com/jixoai",
+  "workFolder": "/tmp/runner-fleet-e2e/mock-work"
+}
