@@ -1,0 +1,48 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- 背景深空渐变：内收 100px 的 824 内容区（macOS 规范），squircle 近似 -->
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#262640"/>
+      <stop offset="0.55" stop-color="#181828"/>
+      <stop offset="1" stop-color="#0e0e1a"/>
+    </linearGradient>
+    <linearGradient id="fg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7ce4ff"/>
+      <stop offset="0.55" stop-color="#0a84ff"/>
+      <stop offset="1" stop-color="#5e5ce6"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="0.4" stop-color="#ffffff" stop-opacity="0.02"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <clipPath id="tile">
+      <rect x="100" y="100" width="824" height="824" rx="186"/>
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#tile)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#bg)"/>
+    <!-- 顶部高光 -->
+    <rect x="100" y="100" width="824" height="824" fill="url(#sheen)"/>
+
+    <!-- 舰队轨道：两段同心弧（多实例编队意象） -->
+    <circle cx="512" cy="512" r="330" fill="none" stroke="url(#fg)" stroke-opacity="0.28" stroke-width="34"
+            stroke-linecap="round" stroke-dasharray="1150 924" stroke-dashoffset="-330"
+            transform="rotate(-58 512 512)"/>
+    <circle cx="512" cy="512" r="224" fill="none" stroke="url(#fg)" stroke-opacity="0.45" stroke-width="30"
+            stroke-linecap="round" stroke-dasharray="760 648" stroke-dashoffset="-235"
+            transform="rotate(-50 512 512)"/>
+
+    <!-- 运行三角（圆角化）：编队核心 -->
+    <path d="M 428 356
+             L 672 486
+             Q 700 502 700 512
+             Q 700 522 672 538
+             L 428 668
+             Q 398 684 398 650
+             L 398 374
+             Q 398 340 428 356 Z"
+          fill="url(#fg)"/>
+  </g>
+</svg>

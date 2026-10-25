@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 7,
+  "sourceSha256": "bd6c3c423dc5581cb36222515259ea6be970ebcea436543ffe6a1b11b73f85e8",
+  "composed": true,
+  "sourceImplementationSha256": null,
+  "implementationSha256": "83eff43acf9177170da1a06bc6960d44e972e5033bf1063abd5f484111bdb8be",
+  "recipeVersion": "squircle-v4:1024:64:196:1:704:72dpi:icns-tagged:wasm-stack",
+  "jsquashPngVersion": "3.1.1",
+  "jsquashResizeVersion": "2.1.1",
+  "resvgVersion": "2.6.2",
+  "iconEncoderVersion": "3.2.3",
+  "figmaSquircleVersion": "1.1.0",
+  "exifrVersion": "7.1.3",
+  "outputPath": "/Users/kzf/Dev/GitHub/gh-runner/assets/icons/build/icon-1024.png",
+  "icnsOutputPath": "/Users/kzf/Dev/GitHub/gh-runner/assets/icons/build/icon.icns",
+  "icoOutputPath": "/Users/kzf/Dev/GitHub/gh-runner/assets/icons/build/icon.ico",
+  "linuxPngOutputPaths": [
+    {
+      "size": 16,
+      "path": "/Users/kzf/Dev/GitHub/gh-runner/assets/icons/build/linux/16x16/app-icon.png"
+    },
+    {
+      "size": 32,
+      "path": "/Users/kzf/Dev/GitHub/gh-runner/assets/icons/build/linux/32x32/app-icon.png"
+    },
+    {
+      "size": 48,
+      "path": "/Users/kzf/Dev/GitHub/gh-runner/assets/icons/build/linux/48x48/app-icon.png"
+    },
+    {
+      "size": 64,
+      "path": "/Users/kzf/Dev/GitHub/gh-runner/assets/icons/build/linux/64x64/app-icon.png"
+    },
+    {
+      "size": 128,
+      "path": "/Users/kzf/Dev/GitHub/gh-runner/assets/icons/build/linux/128x128/app-icon.png"
+    },
+    {
+      "size": 256,
+      "path": "/Users/kzf/Dev/GitHub/gh-runner/assets/icons/build/linux/256x256/app-icon.png"
+    },
+    {
+      "size": 512,
+      "path": "/Users/kzf/Dev/GitHub/gh-runner/assets/icons/build/linux/512x512/app-icon.png"
+    }
+  ],
+  "manifestOutputPath": "/Users/kzf/Dev/GitHub/gh-runner/assets/icons/build/manifest.json",
+  "appIcon": [
+    {
+      "platform": "darwin",
+      "format": "icns",
+      "source": {
+        "type": "file",
+        "path": "/Users/kzf/Dev/GitHub/gh-runner/assets/icons/build/icon.icns"
+      }
+    },
+    {
+      "platform": "windows",
+      "format": "ico",
+      "source": {
+        "type": "file",
+        "path": "/Users/kzf/Dev/GitHub/gh-runner/assets/icons/build/icon.ico"
+      }
+    },
+    {
+      "platform": "linux",
+      "format": "png",
+      "size": 16,
+      "source": {
+        "type": "file",
+        "path": "/Users/kzf/Dev/GitHub/gh-runner/assets/icons/build/linux/16x16/app-icon.png"
+      }
+    },
+    {
+      "platform": "linux",
+      "format": "png",
+      "size": 32,
+      "source": {
+        "type": "file",
+        "path": "/Users/kzf/Dev/GitHub/gh-runner/assets/icons/build/linux/32x32/app-icon.png"
+      }
+    },
+    {
+      "platform": "linux",
+      "format": "png",
+      "size": 48,
+      "source": {
+        "type": "file",
+        "path": "/Users/kzf/Dev/GitHub/gh-runner/assets/icons/build/linux/48x48/app-icon.png"
+      }
+    },
+    {
+      "platform": "linux",
+      "format": "png",
+      "size": 64,
+      "source": {
+        "type": "file",
+        "path": "/Users/kzf/Dev/GitHub/gh-runner/assets/icons/build/linux/64x64/app-icon.png"
+      }
+    },
+    {
+      "platform": "linux",
+      "format": "png",
+      "size": 128,
+      "source": {
+        "type": "file",
+        "path": "/Users/kzf/Dev/GitHub/gh-runner/assets/icons/build/linux/128x128/app-icon.png"
+      }
+    },
+    {
+      "platform": "linux",
+      "format": "png",
+      "size": 256,
+      "source": {
+        "type": "file",
+        "path": "/Users/kzf/Dev/GitHub/gh-runner/assets/icons/build/linux/256x256/app-icon.png"
+      }
+    },
+    {
+      "platform": "linux",
+      "format": "png",
+      "size": 512,
+      "source": {
+        "type": "file",
+        "path": "/Users/kzf/Dev/GitHub/gh-runner/assets/icons/build/linux/512x512/app-icon.png"
+      }
+    }
+  ]
+}

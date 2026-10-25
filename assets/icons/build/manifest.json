@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "appIcon": [
+    {
+      "platform": "darwin",
+      "format": "icns",
+      "source": {
+        "type": "file",
+        "path": "icon.icns"
+      }
+    },
+    {
+      "platform": "windows",
+      "format": "ico",
+      "source": {
+        "type": "file",
+        "path": "icon.ico"
+      }
+    },
+    {
+      "platform": "linux",
+      "format": "png",
+      "size": 16,
+      "source": {
+        "type": "file",
+        "path": "linux/16x16/app-icon.png"
+      }
+    },
+    {
+      "platform": "linux",
+      "format": "png",
+      "size": 32,
+      "source": {
+        "type": "file",
+        "path": "linux/32x32/app-icon.png"
+      }
+    },
+    {
+      "platform": "linux",
+      "format": "png",
+      "size": 48,
+      "source": {
+        "type": "file",
+        "path": "linux/48x48/app-icon.png"
+      }
+    },
+    {
+      "platform": "linux",
+      "format": "png",
+      "size": 64,
+      "source": {
+        "type": "file",
+        "path": "linux/64x64/app-icon.png"
+      }
+    },
+    {
+      "platform": "linux",
+      "format": "png",
+      "size": 128,
+      "source": {
+        "type": "file",
+        "path": "linux/128x128/app-icon.png"
+      }
+    },
+    {
+      "platform": "linux",
+      "format": "png",
+      "size": 256,
+      "source": {
+        "type": "file",
+        "path": "linux/256x256/app-icon.png"
+      }
+    },
+    {
+      "platform": "linux",
+      "format": "png",
+      "size": 512,
+      "source": {
+        "type": "file",
+        "path": "linux/512x512/app-icon.png"
+      }
+    }
+  ]
+}

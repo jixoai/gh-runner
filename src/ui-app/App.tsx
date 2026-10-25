@@ -1,0 +1,93 @@
+import { useEffect, useState } from "react";
+import { Glass } from "solid-glass/react";
+import { Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { InstanceCard } from "@/components/instance-card";
+import { LogPane } from "@/components/log-pane";
+import { RegisterDialog } from "@/components/register-dialog";
+import { setTaskAnnouncer, store } from "@/lib/host";
+import { useStore, useTicker } from "@/lib/hooks";
+import { Toaster, toast } from "sonner";
+
+export function App() {
+  useStore(); // 订阅宿主推送
+  const tick = useTicker(1000);
+  const summary = store.summary;
+  const [selected, setSelected] = useState<string | null>(null);
+  const [registerOpen, setRegisterOpen] = useState(false);
+  const [autoScroll, setAutoScroll] = useState(true);
+
+  useEffect(() => {
+    setTaskAnnouncer((message, kind) =>
+      kind === "ok" ? toast.success(message) : toast.error(message),
+    );
+  }, []);
+
+  // 注册任务进行中自动弹开对话框（进度在对话框内可见）
+  useEffect(() => {
+    if (summary?.task.kind === "register" && summary.task.status === "running") {
+      setRegisterOpen(true);
+    }
+  }, [summary?.task.status, summary?.task.kind]);
+
+  const instances = summary?.instances ?? [];
+  if (selected && !instances.some((i) => i.id === selected)) setSelected(null);
+  const effectiveSelected = selected ?? instances[0]?.id ?? null;
+  const selectedInst = instances.find((i) => i.id === effectiveSelected) ?? null;
+
+  const running = instances.filter((i) => i.processState === "running" || i.processState === "starting").length;
+  const busy = instances.filter((i) => i.currentJob).length;
+
+  return (
+    <div className="flex h-full flex-col">
+      {/* 顶部玻璃条：标题 + 摘要 + 主行动 */}
+      <Glass
+        effect="frosted"
+        options={{ blur: 20, tintOpacity: 0.05 }}
+        className="flex flex-none items-center gap-3 border-b border-border/70 px-4 py-2.5"
+      >
+        <span className="text-sm font-bold tracking-wide">GH Runner</span>
+        <span className="flex-1 truncate text-xs text-muted-foreground">
+          {summary
+            ? `${instances.length} 实例 · ${running} 在跑 · ${busy} 作业中`
+            : "连接宿主中…"}
+        </span>
+        <Button size="sm" className="h-7 gap-1 text-xs" onClick={() => setRegisterOpen(true)}>
+          <Plus className="size-3.5" /> 注册新实例
+        </Button>
+      </Glass>
+
+      {/* 主面板：左实例卡 / 右实时日志（八二空间：高频操作占满视觉区） */}
+      <main className="grid min-h-0 flex-1 grid-cols-[minmax(380px,11fr)_minmax(320px,9fr)]">
+        <section className="min-h-0 space-y-2.5 overflow-y-auto p-3">
+          {instances.length === 0 ? (
+            <div className="grid h-full place-items-center text-sm text-muted-foreground">
+              尚无实例——点击「注册新实例」开始
+            </div>
+          ) : (
+            instances.map((inst) => (
+              <InstanceCard
+                key={inst.id}
+                inst={inst}
+                selected={inst.id === effectiveSelected}
+                onSelect={setSelected}
+                tick={tick}
+              />
+            ))
+          )}
+        </section>
+        <section className="min-h-0 border-l border-border/60 p-3">
+          <LogPane
+            inst={selectedInst}
+            logLines={store.logsOf(effectiveSelected)}
+            autoScroll={autoScroll}
+            onAutoScrollChange={setAutoScroll}
+          />
+        </section>
+      </main>
+
+      <RegisterDialog open={registerOpen} onOpenChange={setRegisterOpen} summary={summary} />
+      <Toaster position="top-center" richColors closeButton />
+    </div>
+  );
+}

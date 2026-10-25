@@ -16,6 +16,7 @@ import { attachOpener } from "@opentray/ext-opener";
 import { Fleet } from "./fleet.ts";
 import { TrayProjection } from "./tray.ts";
 import { UiHost, extendWebview } from "./window.ts";
+import { appIcon } from "./branding.ts";
 
 const APP_ID = "com.jixoai.gh-runner";
 
@@ -194,7 +195,7 @@ async function main(): Promise<void> {
       icon: { "text-only": "▶…" },
       menu: { items: [{ type: "item", id: 1, title: "打开控制面板", primaryEvent: true }] },
     },
-    { appId: APP_ID, appName: "GH Runner" },
+    { appId: APP_ID, appName: "GH Runner", appIcon: appIcon() },
   );
 
   const projection = new TrayProjection(tray, {

@@ -7,7 +7,8 @@
  * 2. 菜单事件路由：实例项 id ↔ 实例 id 映射收在本类内。
  */
 
-import type { CreateTrayHandle, CreateTrayMenu } from "opentray";
+import type { CreateTrayHandle, CreateTrayMenu, Icon } from "opentray";
+import { trayColorPath, trayTemplatePath } from "./branding.ts";
 import type { Snapshot } from "./types.ts";
 
 const ITEM_OPEN = 1;
@@ -43,6 +44,7 @@ export class TrayProjection {
   // 重复调用原生 setIcon/setTooltip/setMenu 会让应用被反复激活，appMode 窗口随之
   // "闪出来"（Owner 2026-10-26 实证：一有动静窗口就跳前台）。内容未变时必须静默。
   #lastIcon: string | null = null;
+  #platform: string = process.platform;
   #lastTooltip: string | null = null;
   #lastMenu: string | null = null;
 
@@ -60,7 +62,8 @@ export class TrayProjection {
     const iconText = busy > 0 ? `▶${running.length}↻${busy}` : `▶${running.length}`;
     if (iconText !== this.#lastIcon) {
       this.#lastIcon = iconText;
-      await this.tray.setIcon({ "text-only": iconText });
+      const icon = this.#iconOf(iconText);
+      if (icon) await this.tray.setIcon(icon);
     }
     const tooltip = JSON.stringify({
       title: "GH Runner",
@@ -78,6 +81,16 @@ export class TrayProjection {
       this.#lastMenu = menu;
       await this.tray.setMenu(JSON.parse(menu));
     }
+  }
+
+  #iconOf(text: string): Icon | null {
+    if (this.#platform === "darwin") {
+      return { "darwin-icon-text": { type: "file", path: trayTemplatePath(), isTemplate: true, text } };
+    }
+    if (this.#platform === "win32") {
+      return { "win32-icon-text": { type: "file", path: trayColorPath(), text } };
+    }
+    return { "text-only": text };
   }
 
   /** onMenuClick 事件入口；返回是否已消费。 */
