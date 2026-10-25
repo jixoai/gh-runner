@@ -14,6 +14,7 @@ let home: string;
 let parent: string;
 let instanceDir: string;
 let fleetModule: typeof import("../src/fleet.ts");
+let cfgDir: string;
 let fleet: import("../src/fleet.ts").Fleet | null = null;
 const fakeExternals: ChildProcess[] = [];
 
@@ -57,14 +58,17 @@ beforeEach(async () => {
       "[2026-10-24 08:01:05Z INFO Terminal] WRITE LINE: 2026-10-24 08:01:05Z: Listening for Jobs",
     ].join("\n") + "\n",
   );
-  // 预写工具配置（HOME 已隔离）：searchDirs 指向 fixture 父目录
-  await mkdir(join(home, "Library", "Application Support", "runner-fleet"), { recursive: true });
-  await writeFile(
-    join(home, "Library", "Application Support", "runner-fleet", "config.json"),
-    JSON.stringify({ searchDirs: [parent], instances: [] }),
-  );
   process.env.HOME = home;
   fleetModule = await import("../src/fleet.ts");
+  // configDir() 依赖 HOME，须在环境替换后求值
+  const { configDir } = await import("../src/config.ts");
+  cfgDir = configDir();
+  // 预写工具配置（HOME 已隔离）：searchDirs 指向 fixture 父目录
+  await mkdir(cfgDir, { recursive: true });
+  await writeFile(
+    join(cfgDir, "config.json"),
+    JSON.stringify({ searchDirs: [parent], instances: [], importedPackages: [] }),
+  );
 });
 
 afterEach(async () => {

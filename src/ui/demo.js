@@ -49,14 +49,23 @@
   const logSent = new Map();
 
   let seq = 0;
+  const packages = [
+    { path: "/Volumes/bnqkl/Users/kzf/actions-runner/actions-runner-osx-arm64-2.338.1.tar.gz", name: "actions-runner-osx-arm64-2.338.1.tar.gz", sizeBytes: 214 * 1024 * 1024, mtimeMs: now - 3600_000, compatible: true },
+    { path: "/Users/kzf/Downloads/actions-runner-win-x64-2.339.0.zip", name: "actions-runner-win-x64-2.339.0.zip", sizeBytes: 198 * 1024 * 1024, mtimeMs: now - 86_400_000, compatible: false },
+  ];
+  let download = null;
   function sink() {
     seq += 1;
     window.__rfSink({
       kind: "summary",
       seq,
       now: new Date().toISOString(),
+      platform: "darwin",
+      arch: "arm64",
       task: window.__demo.task,
       instances: instances.map(({ log: _log, ...rest }) => rest),
+      packages: JSON.parse(JSON.stringify(packages)),
+      download: download ? { ...download } : null,
     });
     for (const inst of instances) {
       const sent = logSent.get(inst.id) ?? 0;
@@ -112,6 +121,26 @@
         inst.external = false;
       }
       if (cmd.type === "set-auto-start" && inst) inst.autoStart = cmd.value;
+      if (cmd.type === "download-latest") {
+        if (download && download.status === "running") return;
+        download = { status: "running", pct: 0, message: "下载 actions-runner-osx-arm64-2.340.0.tar.gz（演示）" };
+        sink();
+        let pct = 0;
+        const t = setInterval(() => {
+          pct = Math.min(100, pct + Math.ceil(Math.random() * 18));
+          download = { status: "running", pct, message: "下载 actions-runner-osx-arm64-2.340.0.tar.gz（演示）" };
+          if (pct >= 100) {
+            clearInterval(t);
+            download = { status: "ok", pct: 100, message: "已下载 /Users/kzf/Library/Application Support/gh-runner/packages/actions-runner-osx-arm64-2.340.0.tar.gz（演示）" };
+            packages.unshift({ path: download.message.slice(4).replace("（演示）", ""), name: "actions-runner-osx-arm64-2.340.0.tar.gz", sizeBytes: 221 * 1024 * 1024, mtimeMs: Date.now(), compatible: true });
+          }
+          sink();
+        }, 400);
+      }
+      if (cmd.type === "import-package") {
+        // 真实宿主走 ext-dialog 系统对话框；演示直接登记一个假路径
+        packages.unshift({ path: "/Users/kzf/Downloads/actions-runner-osx-arm64-2.341.0.tar.gz", name: "actions-runner-osx-arm64-2.341.0.tar.gz", sizeBytes: 223 * 1024 * 1024, mtimeMs: Date.now(), compatible: true });
+      }
       if (cmd.type === "register") {
         demo.task = { kind: "register", status: "running", message: "（演示）开始注册…" };
         const lines = ["$ 解包分发包", "  x actions-runner/", "  x actions-runner/bin/", "$ 移除 quarantine 隔离标记", "$ config.sh 注册", "  √ Connected to GitHub", "  √ Runner successfully added"];

@@ -11,6 +11,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { IS_WIN, runnerSpawn } from "./platform.ts";
 
 export interface SpawnedRunner {
   pid: number;
@@ -38,15 +39,24 @@ export function startRunner(
   onLine: OutputLineSink,
   onError?: (err: Error) => void,
 ): SpawnedRunner | null {
-  const runSh = join(dir, "run.sh");
-  if (!existsSync(runSh)) return null;
+  const entry = runnerSpawn(dir);
+  const exists = IS_WIN ? existsSync(entry.file) : existsSync(join(dir, "run.sh"));
+  if (!exists) return null;
 
-  const child = spawn(join(dir, "run.sh"), [], {
-    cwd: dir,
-    detached: true,
-    stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, RUNNER_MANUALLY_TRAP_SIG: "1" },
-  });
+  const child = IS_WIN
+    ? spawn(entry.file, entry.args, {
+        cwd: dir,
+        detached: true,
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env },
+      })
+    : spawn(entry.file, entry.args, {
+        cwd: dir,
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"],
+        env: { ...process.env, RUNNER_MANUALLY_TRAP_SIG: "1" },
+      });
   // 先挂 error 再判 pid：spawn 失败（EACCES 等）时 pid 同步为 undefined，但 error 事件异步到达——
   // 监听缺失会以 uncaught exception 崩掉整个托盘进程。
   child.on("error", (err) => {
@@ -80,17 +90,30 @@ export function pidExists(pid: number): PidExistence {
 }
 
 /**
- * 终止一个进程组：SIGTERM → graceMs 后仍存活则 SIGKILL。
- * 返回 false 表示终止失败（进程未响应或无权限——EPERM 不算成功）。
+ * 终止：darwin/linux 对进程组 SIGTERM → 限时 SIGKILL；win32 用 taskkill /T（树终止），
+ * 先宽限尝试再强制。返回 false 表示终止失败（进程未响应或无权限——EPERM 不算成功）。
  */
 export async function stopProcessGroup(pid: number, graceMs = 8000): Promise<boolean> {
   const initial = pidExists(pid);
   if (initial === "dead") return true;
 
+  if (IS_WIN) {
+    // Windows 没有可靠的组信号语义；Runner.Listener 收到 taskkill（无 /F）不会退，
+    // 直接树强制终止（作业中强停的代价与 darwin SIGKILL 路径一致）。
+    const tk = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+    const ok = await new Promise<boolean>((resolve) => {
+      tk.on("error", () => resolve(false));
+      tk.on("close", (code) => resolve(code === 0 || pidExists(pid) === "dead"));
+    });
+    const deadline = Date.now() + graceMs;
+    while (ok && Date.now() < deadline && pidExists(pid) !== "dead") {
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    return pidExists(pid) === "dead";
+  }
+
   // 负 pid = 整组（spawn detached 时子进程自成组长）；组信号失败退回单 pid。
-  let signalError: NodeJS.ErrnoException | null = null;
   const signal = (sig: NodeJS.Signals): boolean => {
-    signalError = null;
     try {
       process.kill(-pid, sig);
       return true;
@@ -98,8 +121,7 @@ export async function stopProcessGroup(pid: number, graceMs = 8000): Promise<boo
       try {
         process.kill(pid, sig);
         return true;
-      } catch (err) {
-        signalError = err as NodeJS.ErrnoException;
+      } catch {
         return false;
       }
     }

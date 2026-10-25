@@ -64,17 +64,58 @@ export interface FleetTask {
   message: string | null;
 }
 
+export interface PackageInfo {
+  path: string;
+  name: string;
+  sizeBytes: number;
+  mtimeMs: number;
+  /** 是否匹配当前平台架构。 */
+  compatible: boolean;
+}
+
+export interface DownloadState {
+  status: "running" | "ok" | "error";
+  /** 0-100。 */
+  pct: number;
+  message: string;
+}
+
+export interface ReleaseInfo {
+  tag: string;
+  version: string;
+  assetName: string;
+  url: string;
+  sizeBytes: number;
+}
+
 export interface Snapshot {
   seq: number;
   now: string;
+  /** 当前平台/架构（UI 据此设置表单默认值）。 */
+  platform: string;
+  arch: string;
   instances: InstanceView[];
   task: FleetTask;
+  /** 可选分发包清单（下载缓存 ∪ 导入路径，新者在前）。 */
+  packages: PackageInfo[];
+  /** 进行中/刚完成的最新包下载（null=无）。 */
+  download: DownloadState | null;
 }
 
 /** 宿主 → 页面 推送（经 evaluate 注入 window.__rfSink）。summary 与 log 增量分通道，
  *  避免单次 evaluate 超限（实测 ~100KB 全量快照在 WKWebView 路径上静默失败）。 */
 export type UiPush =
-  | { kind: "summary"; seq: number; now: string; task: FleetTask; instances: Omit<InstanceView, "log">[] }
+  | {
+      kind: "summary";
+      seq: number;
+      now: string;
+      platform: string;
+      arch: string;
+      task: FleetTask;
+      instances: Omit<InstanceView, "log">[];
+      packages: PackageInfo[];
+      download: DownloadState | null;
+    }
   | { kind: "log"; seq: number; id: string; from: number; truncated: boolean; lines: string[] };
 
 /** 页面 → 宿主 命令（经 navigator.opentray.ipc.postMessage）。 */
@@ -85,6 +126,8 @@ export type UiCommand =
   | { type: "stop"; id: string }
   | { type: "set-auto-start"; id: string; value: boolean }
   | { type: "open-diag"; id: string }
+  | { type: "download-latest" }
+  | { type: "import-package" }
   | {
       type: "register";
       dir: string;
@@ -93,14 +136,17 @@ export type UiCommand =
       labels: string;
       orgUrl: string;
       workFolder: string;
-      tarball: string;
+      /** 选定分发包的绝对路径（下载缓存或导入路径）。 */
+      packagePath: string;
     };
 
-/** 工具自身配置（持久化于 ~/Library/Application Support/runner-fleet/config.json）。 */
+/** 工具自身配置（持久化于平台配置目录/gh-runner/config.json）。 */
 export interface ToolConfig {
   /** 自动发现 runner 的父目录集合。 */
   searchDirs: string[];
   instances: InstanceConfig[];
+  /** 用户导入的分发包绝对路径（不复制，仅登记）。 */
+  importedPackages: string[];
 }
 
 export interface InstanceConfig {

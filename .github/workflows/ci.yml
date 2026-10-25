@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS：完整门禁（类型 + 测试 + 构建）
+          - os: macos-latest
+            full: "true"
+          # Windows：类型 + 构建门禁（E2E 依赖 POSIX 进程语义，不在 Windows 跑）
+          - os: windows-latest
+            full: "false"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm build
+      - if: matrix.full == 'true'
+        run: pnpm test

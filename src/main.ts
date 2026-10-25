@@ -12,18 +12,41 @@ import { homedir } from "node:os";
 import { writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { createTray } from "opentray";
+import { attachDialog } from "@opentray/ext-dialog";
 import { Fleet } from "./fleet.ts";
 import { TrayProjection } from "./tray.ts";
 import { UiHost, extendWebview } from "./window.ts";
+import { revealInFileManager } from "./platform.ts";
 
-const APP_ID = "com.jixoai.runner-fleet";
+const APP_ID = "com.jixoai.gh-runner";
+
+async function revealPath(path: string): Promise<void> {
+  const { file, args } = revealInFileManager(path);
+  await new Promise<void>((resolve) => {
+    execFile(file, args, () => resolve());
+  });
+}
+
+/** 导入本地分发包：系统文件选择框（ext-dialog；darwin NSOpenPanel / win32 对话框）。 */
+async function pickPackageFile(tray: Awaited<ReturnType<typeof createTray>>): Promise<string | null> {
+  try {
+    const dialog = attachDialog(tray);
+    const picked = await dialog.pickFile({
+      filters: [{ name: "runner 包", extensions: ["gz", "zip"] }],
+    });
+    return typeof picked === "string" ? picked : null;
+  } catch (err) {
+    console.error("[gh-runner] 包选择失败:", err);
+    return null;
+  }
+}
 
 /** --probe：探明真实窗口里注入的页面桥形态。三通道取证：页面 ipc 上行 / 宿主 evaluate 内省 +
  *  titlechange 回传 / loadstate 时机观测。 */
 async function runProbe(): Promise<void> {
   const tray = await createTray(
     { id: APP_ID, icon: { "text-only": "probe" } },
-    { appId: APP_ID, appName: "Runner Fleet Probe" },
+    { appId: APP_ID, appName: "GH Runner Probe" },
   );
   const webviewTray = extendWebview(tray);
   const win = webviewTray.createWebviewWindow({
@@ -41,7 +64,7 @@ async function runProbe(): Promise<void> {
   });
   const report: Record<string, unknown> = { ipc: "none", loadstate: [], titlechange: "none" };
   const finish = async (): Promise<void> => {
-    await writeFile("/tmp/runner-fleet-probe.json", JSON.stringify(report, null, 2), "utf8");
+    await writeFile("/tmp/gh-runner-probe.json", JSON.stringify(report, null, 2), "utf8");
     await win.destroy();
     await tray.destroy();
     process.exit(0);
@@ -87,12 +110,6 @@ async function runProbe(): Promise<void> {
   await finish();
 }
 
-async function openInFinder(path: string): Promise<void> {
-  await new Promise<void>((resolve) => {
-    execFile("open", ["-R", path], () => resolve());
-  });
-}
-
 async function runSmoke(fleet: Fleet, uiHost: UiHost): Promise<void> {
   await uiHost.open();
   const deadline = Date.now() + 30_000;
@@ -111,7 +128,7 @@ async function runSmoke(fleet: Fleet, uiHost: UiHost): Promise<void> {
   }
   const snap = uiHost.lastSnapshot;
   await writeFile(
-    "/tmp/runner-fleet-smoke.json",
+    "/tmp/gh-runner-smoke.json",
     JSON.stringify(
       {
         ok: uiHost.ackedSeq > 0,
@@ -185,7 +202,7 @@ async function main(): Promise<void> {
       icon: { "text-only": "▶…" },
       menu: { items: [{ type: "item", id: 1, title: "打开控制面板", primaryEvent: true }] },
     },
-    { appId: APP_ID, appName: "Runner Fleet" },
+    { appId: APP_ID, appName: "GH Runner" },
   );
 
   const projection = new TrayProjection(tray, {
@@ -198,10 +215,15 @@ async function main(): Promise<void> {
     quit: () => void shutdown(),
   });
   const webviewTray = extendWebview(tray);
-  const uiHost = new UiHost(fleet, webviewTray, (id) => {
-    const view = fleet.view(id);
-    if (view) void openInFinder(`${view.dir}/_diag`);
-  });
+  const uiHost = new UiHost(
+    fleet,
+    webviewTray,
+    (id) => {
+      const view = fleet.view(id);
+      if (view) void revealPath(`${view.dir}/_diag`);
+    },
+    () => pickPackageFile(tray),
+  );
 
   fleet.onSnapshot((snap) => {
     void projection.update(snap);
@@ -224,10 +246,10 @@ async function main(): Promise<void> {
   };
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
-  console.log(`[runner-fleet] 已启动（配置目录 ${homedir()}/Library/Application Support/runner-fleet）`);
+  console.log(`[gh-runner] 已启动（配置目录 ${homedir()}/Library/Application Support/gh-runner）`);
 }
 
 void main().catch((err) => {
-  console.error("[runner-fleet] 启动失败:", err);
+  console.error("[gh-runner] 启动失败:", err);
   process.exit(1);
 });

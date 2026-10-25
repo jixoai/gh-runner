@@ -8,9 +8,10 @@
  */
 
 import { readdir, readFile, realpath } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { IS_WIN } from "./platform.ts";
 import type { InstanceConfig } from "./types.ts";
 
 const exec = promisify(execFile);
@@ -75,8 +76,35 @@ export async function discoverRunnerDirs(searchDirs: string[]): Promise<string[]
   return found.sort();
 }
 
-/** 返回本机所有 `Runner.Listener run` 进程：pid → cwd。 */
+/**
+ * 全部 Runner.Listener 进程 → pid 身份（darwin/linux = cwd；win32 = 由 ExecutablePath 推导的
+ * runner 目录）。身份与实例目录对账。
+ */
 export async function findListenerProcesses(): Promise<Map<number, string>> {
+  if (IS_WIN) {
+    const result = new Map<number, string>();
+    try {
+      const { stdout } = await exec(
+        "powershell",
+        [
+          "-NoProfile",
+          "-Command",
+          `Get-CimInstance Win32_Process -Filter "Name='Runner.Listener.exe'" | ForEach-Object { "$($_.ProcessId)|$($_.ExecutablePath)" }`,
+        ],
+        { timeout: 15_000 },
+      );
+      for (const line of stdout.split(/\r?\n/)) {
+        const m = /^(\d+)\|(.+)$/.exec(line.trim());
+        if (!m) continue;
+        // …\actions-runner\bin\Runner.Listener.exe → runner 目录是 bin 的上一级
+        result.set(Number(m[1]), dirname(dirname(m[2]!)));
+      }
+    } catch {
+      /* 无匹配或 PowerShell 不可用 */
+    }
+    return result;
+  }
+
   const result = new Map<number, string>();
   try {
     const { stdout } = await exec("pgrep", ["-f", "Runner.Listener run"]);
@@ -108,22 +136,12 @@ export async function findListenerProcesses(): Promise<Map<number, string>> {
 
 /** 实例默认 id：目录名。 */
 export function instanceIdOf(dir: string, _cfg?: InstanceConfig): string {
-  const parts = dir.split("/").filter(Boolean);
+  const parts = dir.split(/[\\/]+/).filter(Boolean);
   return parts[parts.length - 1] ?? dir;
 }
 
-/** 读取单个 pid 的 cwd（解析失败/无权限返回 null）。供停止前的 pid 复用核验。 */
-export async function pidCwd(pid: number): Promise<string | null> {
-  try {
-    const { stdout } = await exec("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"]);
-    for (const line of stdout.split("\n")) {
-      if (line.startsWith("n/")) {
-        const raw = line.slice(1);
-        return await realpath(raw).catch(() => raw);
-      }
-    }
-    return null;
-  } catch {
-    return null;
-  }
+/** 单个 pid 的身份（同 findListenerProcesses 口径；读不到返回 null）。供停止前的 pid 复用核验。 */
+export async function pidIdentity(pid: number): Promise<string | null> {
+  const all = await findListenerProcesses();
+  return all.get(pid) ?? null;
 }

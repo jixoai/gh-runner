@@ -12,6 +12,7 @@ let home: string;
 let parent: string;
 let instanceDir: string;
 let fleetModule: typeof import("../src/fleet.ts");
+let cfgDir: string;
 let fleet: import("../src/fleet.ts").Fleet | null = null;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -24,9 +25,11 @@ beforeEach(async () => {
   const fixture = join(import.meta.dirname, "fixtures", "mock-runner");
   await copyFile(join(fixture, "run.sh"), join(instanceDir, "run.sh"));
   await writeFile(join(instanceDir, ".runner"), JSON.stringify({ agentId: 998, agentName: "reg-ext-98" }));
-  await mkdir(join(home, "Library", "Application Support", "runner-fleet"), { recursive: true });
   process.env.HOME = home;
   fleetModule = await import("../src/fleet.ts");
+  const { configDir } = await import("../src/config.ts");
+  cfgDir = configDir();
+  await mkdir(cfgDir, { recursive: true });
 });
 
 afterEach(async () => {
@@ -42,8 +45,8 @@ describe("回归：spawn 失败与配置损坏", () => {
     await chmod(join(instanceDir, "run.sh"), 0o644);
     const { writeFile: wf } = await import("node:fs/promises");
     await wf(
-      join(home, "Library", "Application Support", "runner-fleet", "config.json"),
-      JSON.stringify({ searchDirs: [parent], instances: [] }),
+      join(cfgDir, "config.json"),
+      JSON.stringify({ searchDirs: [parent], instances: [], importedPackages: [] }),
     );
     fleet = new fleetModule.Fleet();
     const bootPromise = fleet.boot();
@@ -65,7 +68,7 @@ describe("回归：spawn 失败与配置损坏", () => {
 
   it("config.json 形状损坏：boot 容错并继续发现实例", async () => {
     await writeFile(
-      join(home, "Library", "Application Support", "runner-fleet", "config.json"),
+      join(cfgDir, "config.json"),
       JSON.stringify({ searchDirs: [parent], instances: [{ autoStart: true }, { id: "x", dir: "not-absolute", autoStart: false }] }),
     );
     fleet = new fleetModule.Fleet();

@@ -1,16 +1,47 @@
 {
-  "name": "runner-fleet",
-  "version": "0.1.0",
-  "private": true,
+  "name": "@jixoai/gh-runner",
+  "version": "0.2.0",
+  "description": "Menu-bar (tray) manager for multiple GitHub Actions self-hosted runners: discover, register from downloaded/imported packages, start/stop, and live job-result analysis. macOS & Windows.",
   "type": "module",
-  "description": "Tray tool for managing multiple GitHub Actions self-hosted runners on one Mac",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jixoai/gh-runner.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jixoai/gh-runner/issues"
+  },
+  "homepage": "https://github.com/jixoai/gh-runner#readme",
+  "keywords": [
+    "github-actions",
+    "self-hosted-runner",
+    "tray",
+    "menubar",
+    "runner-fleet"
+  ],
+  "bin": {
+    "gh-runner": "./dist/main.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "packageManager": "pnpm@12.4.1",
   "scripts": {
     "build": "tsdown && mkdir -p dist/ui && cp src/ui/index.html src/ui/demo.js dist/ui/",
     "start": "node dist/main.mjs",
     "dev": "pnpm build && node dist/main.mjs --dry-run 4",
     "smoke": "pnpm build && node dist/main.mjs --smoke",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build"
   },
   "dependencies": {
     "@opentray/ext-dialog": "^0.36.0",

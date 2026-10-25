@@ -1,4 +1,4 @@
-# Runner Fleet — 架构规格
+# @jixoai/gh-runner — 架构规格
 
 > 原始需求（2026-10-24）：多开 GitHub self-hosted runner（本机已有 mac-ext-01..04），
 > 做一个挂在托盘里的管理工具——表单配置后可把 runner 当实例启动/关闭；
@@ -38,18 +38,23 @@
 2. **外部进程对账**：每 2s `pgrep -f "Runner.Listener run"` + `lsof -d cwd`，双侧 realpath 归一
    （/var ↔ /private/var）后按 cwd 匹配实例目录。工具重启后自动重连 detached 幸存的受管实例。
    停止外部实例前对该 pid 复核 cwd（防 pid 复用误杀）。
-3. **推送协议（实测教训）**：单次 evaluate ~100KB 全量快照在 WKWebView 路径上**静默失败**
+3. **包获取三通道**：GitHub actions/runner 官方 release（api.github.com 最新版 → 流式下载
+   tmp→rename 原子落盘，进度经 snapshot.download 推送）∪ 本地导入（ext-dialog 系统文件选择框，
+   路径登记进 config.importedPackages 不复制）∪ 下载缓存目录；统一 `tar -xf` 解包（bsdtar 同时
+   支持 tar.gz/zip，三平台内置）。Windows 注册走 `Runner.Listener configure` 动词、启动直跑
+   `Runner.Listener.exe run`，进程发现用 PowerShell CIM 的 ExecutablePath、终止用 `taskkill /T`。
+4. **推送协议（实测教训）**：单次 evaluate ~100KB 全量快照在 WKWebView 路径上**静默失败**
    （promise resolve 但页面未执行）。故拆为 `summary`（KB 级）+ `log` 增量（按字节 ≤24KB/包）双通道；
    推送单飞串行（hello 与去抖推送并发交错会重复投递）；页面 hello → 宿主 offset 清零全量重推；
    ack 单调记录（smoke 以此判定闭环）。
-4. **spawn 失败三律**（对抗式复核实证）：error 事件必须先于 pid 判空挂监听（否则 uncaught 崩托盘）；
+5. **spawn 失败三律**（对抗式复核实证）：error 事件必须先于 pid 判空挂监听（否则 uncaught 崩托盘）；
    spawn 失败只发 error+close 不发 exit（必须用 close 收尾，否则永久卡「启动中」）；
    config.json 形状损坏必须容错（合法 JSON + 缺字段即 brick 启动）。
-5. **停止语义**：受管实例杀进程组（TERM→8s→KILL）；外部实例 TERM 其 Listener pid（等价于
+6. **停止语义**：受管实例杀进程组（TERM→8s→KILL）；外部实例 TERM 其 Listener pid（等价于
    终端里 Ctrl-C），pid 复用核验不过即放弃。kill(2) 区分 ESRCH/EPERM，EPERM=存活无权限=失败
    （sudo 启动的 runner 会得到明确错误而非假成功）。作业中强停会让 GitHub 把作业标记失败——
    UI 在此情形弹确认。
-6. **受管 runner detached**：工具退出不杀 runner（与"终端里跑"等价），下次启动自动重连。
+7. **受管 runner detached**：工具退出不杀 runner（与"终端里跑"等价），下次启动自动重连。
    验证模式（--dry-run/--smoke）以 `boot({autoStart:false, persist:false})` 保证零副作用。
 
 ## 文件意图

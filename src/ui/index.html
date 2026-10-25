@@ -126,6 +126,21 @@
   .field input:focus { outline: 2px solid color-mix(in srgb, var(--run) 55%, transparent); border-color: transparent; }
   .field .hint { font-size: 10.5px; color: var(--ink-2); }
   .field .hint a { color: var(--run); text-decoration: none; }
+  .pkg-row { display: flex; gap: 6px; }
+  .pkg-row select {
+    flex: 1; min-width: 0; font: inherit; padding: 5px 7px; border: 1px solid var(--line);
+    border-radius: 7px; background: var(--bg); color: var(--ink);
+  }
+  .pkg-row button { white-space: nowrap; }
+  .pkg-row button[disabled] { opacity: .45; }
+  #pkg-progress {
+    height: 4px; border-radius: 99px; background: var(--chip); overflow: hidden; margin-top: 6px;
+  }
+  #pkg-progress-bar {
+    height: 100%; width: 0%; background: var(--run); border-radius: 99px; transition: width .3s;
+  }
+  #pkg-hint.ok { color: var(--ok); }
+  #pkg-hint.bad { color: var(--bad); }
   .dlg-foot { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 18px; border-top: 1px solid var(--line); }
   #reg-progress {
     font-family: var(--mono); font-size: 10.5px; max-height: 130px; overflow-y: auto; white-space: pre-wrap;
@@ -196,8 +211,14 @@
         <input name="workFolder" placeholder="/Volumes/bnqkl/Users/kzf/gh-runner-work-5" required>
       </div>
       <div class="field">
-        <label>分发包（留空自动探测 actions-runner-osx-*.tar.gz）</label>
-        <input name="tarball" placeholder="自动探测">
+        <label>分发包（解包并注册；可从 GitHub 下载最新或导入本地包）</label>
+        <div class="pkg-row">
+          <select id="pkg-select" name="packagePath" class="scroll-thin"></select>
+          <button type="button" id="pkg-download" title="从 actions/runner 官方 release 下载当前平台最新包">⤓ 最新</button>
+          <button type="button" id="pkg-import" title="选择本地包文件（tar.gz / zip）">导入…</button>
+        </div>
+        <span class="hint" id="pkg-hint"></span>
+        <div id="pkg-progress" style="display:none"><div id="pkg-progress-bar"></div></div>
       </div>
       <pre id="reg-progress" class="scroll-thin"></pre>
     </div>
@@ -213,7 +234,7 @@
 "use strict";
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-const state = { snap: null, selected: null, logs: new Map(), boot: Date.now() };
+const state = { snap: null, selected: null, logs: new Map(), boot: Date.now(), platform: null, labelsTouched: false };
 
 /* ---------- 上行通道 ---------- */
 function send(cmd) {
@@ -226,7 +247,9 @@ function send(cmd) {
 window.__rfSink = (msg) => {
   if (msg.kind === "summary") {
     state.snap = msg;
+    if (!state.platform) applyPlatformDefaults(msg.platform, msg.arch);
     render();
+    renderPackages(msg.packages, msg.download);
   } else if (msg.kind === "log") {
     let buf = state.logs.get(msg.id);
     if (!buf) { buf = []; state.logs.set(msg.id, buf); }
@@ -237,6 +260,80 @@ window.__rfSink = (msg) => {
   }
   send({ type: "ack", seq: msg.seq });
 };
+
+/* ---------- 平台默认值（首次 summary 时应用，不覆盖用户已编辑的字段） ---------- */
+function applyPlatformDefaults(platform, arch) {
+  state.platform = platform;
+  const isWin = platform === "win32";
+  const labels = platform === "darwin"
+    ? "self-hosted,macOS,ARM64"
+    : isWin
+      ? `self-hosted,Windows,${(arch === "arm64" ? "ARM64" : "X64")}`
+      : `self-hosted,Linux,${(arch === "arm64" ? "ARM64" : "X64")}`;
+  const labelsInput = document.querySelector('#register-form input[name="labels"]');
+  if (labelsInput && !state.labelsTouched) labelsInput.value = labels;
+  const dirInput = document.querySelector('#register-form input[name="dir"]');
+  if (dirInput) dirInput.placeholder = isWin ? "C:\\actions-runner-5" : "/Volumes/bnqkl/Users/kzf/actions-runner-5";
+  const workInput = document.querySelector('#register-form input[name="workFolder"]');
+  if (workInput) workInput.placeholder = isWin ? "C:\\gh-runner-work-5" : "/Volumes/bnqkl/Users/kzf/gh-runner-work-5";
+}
+
+/* ---------- 包清单 / 下载进度 ---------- */
+function fmtSize(bytes) {
+  if (bytes >= 1 << 30) return (bytes / (1 << 30)).toFixed(1) + " GB";
+  if (bytes >= 1 << 20) return (bytes / (1 << 20)).toFixed(0) + " MB";
+  return Math.max(1, Math.round(bytes / (1 << 10))) + " KB";
+}
+function renderPackages(packages, download) {
+  const sel = $("#pkg-select");
+  const prev = sel.value;
+  sel.innerHTML = "";
+  if (!packages || packages.length === 0) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "（暂无包：点「⤓ 最新」下载或「导入…」）";
+    sel.appendChild(opt);
+  }
+  for (const pkg of packages || []) {
+    const opt = document.createElement("option");
+    opt.value = pkg.path;
+    opt.textContent = `${pkg.name}（${fmtSize(pkg.sizeBytes)}）${pkg.compatible ? "" : " · 不兼容"}`;
+    opt.disabled = !pkg.compatible;
+    sel.appendChild(opt);
+  }
+  if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
+
+  const hint = $("#pkg-hint");
+  const bar = $("#pkg-progress");
+  const barFill = $("#pkg-progress-bar");
+  const busy = download && download.status === "running";
+  $("#pkg-download").disabled = !!busy;
+  $("#pkg-import").disabled = !!busy;
+  if (!download) {
+    hint.className = "hint";
+    hint.textContent = packages && packages.length > 0 ? "" : "";
+    bar.style.display = "none";
+  } else if (download.status === "running") {
+    hint.className = "hint";
+    hint.textContent = download.message;
+    bar.style.display = "block";
+    barFill.style.width = download.pct + "%";
+  } else if (download.status === "ok") {
+    hint.className = "hint ok";
+    hint.textContent = "✔ " + download.message;
+    bar.style.display = "none";
+  } else {
+    hint.className = "hint bad";
+    hint.textContent = "✘ " + download.message;
+    bar.style.display = "none";
+  }
+}
+
+$("#pkg-download").addEventListener("click", () => send({ type: "download-latest" }));
+$("#pkg-import").addEventListener("click", () => send({ type: "import-package" }));
+document.querySelector('#register-form input[name="labels"]').addEventListener("input", () => {
+  state.labelsTouched = true;
+});
 
 /* ---------- 渲染 ---------- */
 function dotClass(inst) {
@@ -442,7 +539,7 @@ $("#register-form").addEventListener("submit", (e) => {
     type: "register",
     dir: get("dir"), name: get("name"), token: get("token"), labels: get("labels"),
     orgUrl: get("orgUrl"), workFolder: get("workFolder"),
-    tarball: get("tarball"),
+    packagePath: get("packagePath"),
   });
   progress.textContent += "已提交注册请求…\n";
 });

@@ -18,7 +18,7 @@ import {
   discoverRunnerDirs,
   findListenerProcesses,
   instanceIdOf,
-  pidCwd,
+  pidIdentity,
   readRunnerMeta,
   type RunnerMeta,
 } from "./discover.ts";
@@ -30,6 +30,13 @@ import {
 } from "./supervisor.ts";
 import { loadConfig, saveConfig, upsertInstance } from "./config.ts";
 import { registerRunner, type RegisterRequest } from "./register.ts";
+import {
+  listPackages,
+  fetchLatestReleaseInfo,
+  downloadPackage,
+  type DownloadState,
+} from "./packages.ts";
+import { ARCH, PLATFORM, isAbsolutePath } from "./platform.ts";
 import type {
   CurrentJob,
   FleetTask,
@@ -84,6 +91,8 @@ export class Fleet {
   #task: FleetTask = { kind: "none", status: "ok", message: null };
   #ticking = false;
   #persist = true;
+  #download: DownloadState | null = null;
+  #downloading = false;
 
   async boot(options: BootOptions = {}): Promise<void> {
     this.#persist = options.persist ?? true;
@@ -114,11 +123,82 @@ export class Fleet {
     return {
       seq: this.#seq,
       now: new Date().toISOString(),
+      platform: PLATFORM,
+      arch: ARCH,
       instances: [...this.#rts.values()]
         .map((rt) => this.#view(rt))
         .sort((a, b) => a.name.localeCompare(b.name)),
       task: this.#task,
+      packages: this.#packages,
+      download: this.#download,
     };
+  }
+
+  #packages: Snapshot["packages"] = [];
+
+  /** 刷新包清单（下载目录 ∪ 导入清单），变更时推送。 */
+  async #refreshPackages(): Promise<void> {
+    try {
+      const before = JSON.stringify(this.#packages);
+      const stale: string[] = [];
+      this.#packages = await listPackages(this.#config?.importedPackages ?? []);
+      const paths = new Set(this.#packages.map((p) => p.path));
+      for (const imported of this.#config?.importedPackages ?? []) {
+        if (!paths.has(imported)) stale.push(imported);
+      }
+      if (stale.length > 0 && this.#config) {
+        // 导入的包文件已被删除：从清单登记中移除（下载缓存目录里的由 listPackages 自行过滤）。
+        this.#config.importedPackages = (this.#config.importedPackages ?? []).filter(
+          (p) => !stale.includes(p),
+        );
+        if (this.#persist) await saveConfig(this.#config);
+      }
+      if (JSON.stringify(this.#packages) !== before) this.#emitSoon();
+    } catch {
+      /* 清单刷新失败不拖垮 tick */
+    }
+  }
+
+  /** 下载 actions/runner 最新平台的包（进度写入 snapshot.download，完成后刷新清单）。 */
+  async downloadLatest(): Promise<void> {
+    if (this.#downloading) return;
+    this.#downloading = true;
+    this.#download = { status: "running", pct: 0, message: "查询最新 release…" };
+    this.#emitSoon();
+    try {
+      const release = await fetchLatestReleaseInfo();
+      this.#download = { status: "running", pct: 0, message: `下载 ${release.assetName}` };
+      this.#emitSoon();
+      const dest = await downloadPackage(release, (pct) => {
+        this.#download = { status: "running", pct, message: `下载 ${release.assetName}` };
+        this.#emitSoon();
+      });
+      this.#download = { status: "ok", pct: 100, message: `已下载 ${dest}` };
+      await this.#refreshPackages();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.#download = { status: "error", pct: 0, message };
+    } finally {
+      this.#downloading = false;
+      this.#emitSoon();
+      // 成功态停留一段时间后清除
+      setTimeout(() => {
+        if (this.#download && this.#download.status !== "running") {
+          this.#download = null;
+          this.#emitSoon();
+        }
+      }, 8000).unref?.();
+    }
+  }
+
+  /** 通过系统文件选择对话框导入本地包路径（登记进 config，不复制）。 */
+  async importPackage(path: string): Promise<void> {
+    if (!this.#config || !isAbsolutePath(path)) return;
+    if (!this.#config.importedPackages.includes(path)) {
+      this.#config.importedPackages = [...this.#config.importedPackages, path];
+      if (this.#persist) await saveConfig(this.#config);
+    }
+    await this.#refreshPackages();
   }
 
   /** 页面加载完成后的主动重推（对齐 hello）。 */
@@ -150,9 +230,7 @@ export class Fleet {
       },
     );
     if (!spawned) {
-      rt.lastError = existsSync(join(rt.dir, "run.sh"))
-        ? "run.sh 无法启动（检查执行权限/解释器）"
-        : `未找到 ${join(rt.dir, "run.sh")}：目录缺少 runner 程序`;
+      rt.lastError = "无法启动 runner（检查 run.sh / Runner.Listener.exe 是否存在且有执行权限）";
       this.#emit();
       return;
     }
@@ -189,11 +267,17 @@ export class Fleet {
     const pid = rt.pid;
     const wasExternal = rt.external;
     if (wasExternal) {
-      // pid 复用防护：终止前核对该 pid 的 cwd 仍是本实例目录（缓存 pid 可能已易主）。
-      const cwd = await pidCwd(pid);
-      if (cwd === null) {
+      // pid 复用防护：终止前核对该 pid 的身份（cwd/可执行路径）仍是本实例目录。
+      const identity = await pidIdentity(pid);
+      const rtDirReal = await realpath(rt.dir).catch(() => rt.dir);
+      const same = (a: string | null, b: string): boolean => {
+        if (a === null) return false;
+        if (PLATFORM === "win32") return a.replace(/\\/g, "/").toLowerCase() === b.replace(/\\/g, "/").toLowerCase();
+        return a === b || a === rtDirReal;
+      };
+      if (identity === null) {
         if (pidExists(pid) !== "dead") {
-          // lsof 读不到（可能是 root 属主），但进程还活着：继续尝试，失败会以 EPERM 暴露。
+          // 读不到身份（可能是 root 属主），但进程还活着：继续尝试，失败会以 EPERM 暴露。
         } else {
           rt.pid = null;
           rt.external = false;
@@ -202,7 +286,7 @@ export class Fleet {
           this.#emit();
           return;
         }
-      } else if (cwd !== rt.dir && cwd !== (await realpath(rt.dir).catch(() => rt.dir))) {
+      } else if (!same(identity, rt.dir)) {
         rt.lastError = "停止已取消：该 pid 已不属于本实例（等待重新对账）";
         rt.pid = null;
         rt.external = false;
@@ -391,6 +475,7 @@ export class Fleet {
     try {
       await this.#syncInstances();
       await this.#reconcileExternal();
+      await this.#refreshPackages();
     } catch {
       /* 轮询容错 */
     }

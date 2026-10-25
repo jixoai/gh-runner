@@ -43,6 +43,8 @@ export class UiHost {
     private readonly fleet: Fleet,
     private readonly webviewTray: WebviewTray,
     private readonly onOpenDiag: (id: string) => void,
+    /** 系统文件选择器（ext-dialog pickFile）；取消/不可用返回 null。 */
+    private readonly pickPackageFile: () => Promise<string | null>,
   ) {}
 
   async open(): Promise<void> {
@@ -57,7 +59,7 @@ export class UiHost {
       html,
       width: 1020,
       height: 700,
-      title: "Runner Fleet",
+      title: "GH Runner",
       nativeWindowApi: true,
       devtools: true,
       style: {
@@ -132,11 +134,15 @@ export class UiHost {
         kind: "summary",
         seq: ++this.#seq,
         now: snap.now,
+        platform: snap.platform,
+        arch: snap.arch,
         task: snap.task,
         instances: snap.instances.map((inst) => {
           const { log: _log, ...rest } = inst;
           return rest satisfies Omit<InstanceView, "log">;
         }),
+        packages: snap.packages,
+        download: snap.download,
       };
       await this.#evaluate(JSON.stringify(summary));
       for (const inst of snap.instances) {
@@ -265,8 +271,18 @@ export class UiHost {
           labels: cmd.labels,
           orgUrl: cmd.orgUrl,
           workFolder: cmd.workFolder,
-          tarball: cmd.tarball,
+          packagePath: cmd.packagePath,
         });
+        break;
+      }
+      case "download-latest": {
+        void this.fleet.downloadLatest();
+        break;
+      }
+      case "import-package": {
+        // 系统文件选择对话框（ext-dialog）；取消返回 null。
+        const picked = await this.pickPackageFile();
+        if (picked) await this.fleet.importPackage(picked);
         break;
       }
     }

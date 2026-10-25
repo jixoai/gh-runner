@@ -56,7 +56,7 @@ export class TrayProjection {
       "text-only": busy > 0 ? `▶${running.length}↻${busy}` : `▶${running.length}`,
     });
     await this.tray.setTooltip({
-      title: "Runner Fleet",
+      title: "GH Runner",
       description:
         snapshot.instances
           .map((_, index) => `${snapshot.instances[index]!.name}: ${stateLabel(snapshot, index)}`)
@@ -97,7 +97,7 @@ export class TrayProjection {
       });
     });
     items.push({ type: "separator" });
-    items.push({ type: "item", id: ITEM_QUIT, title: "退出 Runner Fleet" });
+    items.push({ type: "item", id: ITEM_QUIT, title: "退出 GH Runner" });
     return { items };
   }
 }

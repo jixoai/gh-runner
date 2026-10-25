@@ -1,0 +1,32 @@
+# 发布到 npm（@jixoai/gh-runner）。
+# OIDC 可信发布：npm 侧 Trusted Publisher 已配置为本工作流（release.yml）+ environment（npm-publish）；
+# 发布凭据经 GitHub Actions OIDC 短期令牌换取，不使用长期 NPM_TOKEN。
+# 触发：推送 v* 标签（如 v0.2.0）。
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  npm-publish:
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      id-token: write # OIDC trusted publishing
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24 # npm >= 11.5.1，内置 trusted publishing 支持
+          registry-url: "https://registry.npmjs.org"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      - run: npm publish --provenance --access public

@@ -2,19 +2,20 @@
  * 原始需求（2026-10-24）：工具自身的实例清单（搜索目录、autoStart）需要跨启动持久化。
  *
  * 正交意图：
- * 1. 读写 ~/Library/Application Support/runner-fleet/config.json（损坏时回退默认）。
+ * 1. 读写 ~/Library/Application Support/gh-runner/config.json（损坏时回退默认）。
  * 2. 注册新实例 / 更新实例配置的纯数据操作。
  */
 
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { defaultSearchDirs, isAbsolutePath } from "./platform.ts";
 import type { InstanceConfig, ToolConfig } from "./types.ts";
 
-export const DEFAULT_SEARCH_DIRS = ["/Volumes/bnqkl/Users/kzf"];
+export const DEFAULT_SEARCH_DIRS = defaultSearchDirs();
 
 export function configDir(): string {
-  return join(homedir(), "Library", "Application Support", "runner-fleet");
+  return join(homedir(), "Library", "Application Support", "gh-runner");
 }
 
 function configPath(): string {
@@ -36,17 +37,21 @@ export async function loadConfig(): Promise<ToolConfig> {
     const raw = (await readFile(configPath(), "utf8")).replace(/^\uFEFF/, "");
     const parsed = JSON.parse(raw) as Partial<ToolConfig>;
     const searchDirs = Array.isArray(parsed.searchDirs)
-      ? parsed.searchDirs.filter((d): d is string => typeof d === "string" && d.startsWith("/"))
+      ? parsed.searchDirs.filter((d): d is string => typeof d === "string" && isAbsolutePath(d))
       : [];
     const instances = Array.isArray(parsed.instances)
       ? parsed.instances.filter((i): i is InstanceConfig => validInstance(i))
       : [];
+    const importedPackages = Array.isArray(parsed.importedPackages)
+      ? parsed.importedPackages.filter((p): p is string => typeof p === "string")
+      : [];
     return {
       searchDirs: searchDirs.length > 0 ? searchDirs : DEFAULT_SEARCH_DIRS,
       instances,
+      importedPackages,
     };
   } catch {
-    return { searchDirs: DEFAULT_SEARCH_DIRS, instances: [] };
+    return { searchDirs: DEFAULT_SEARCH_DIRS, instances: [], importedPackages: [] };
   }
 }
 
