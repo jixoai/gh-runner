@@ -8,11 +8,11 @@
  * 3. 验证模式：--dry-run 无头打印快照；--smoke 起真实托盘+窗口并等待页面 hello/ack 后落盘诊断。
  */
 
-import { homedir } from "node:os";
 import { writeFile } from "node:fs/promises";
 import { createTray } from "opentray";
 import { attachDialog } from "@opentray/ext-dialog";
 import { attachOpener } from "@opentray/ext-opener";
+import { configDir } from "./config.ts";
 import { Fleet } from "./fleet.ts";
 import { TrayProjection } from "./tray.ts";
 import { UiHost, extendWebview } from "./window.ts";
@@ -241,7 +241,7 @@ async function main(): Promise<void> {
   };
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
-  console.log(`[gh-runner] 已启动（配置目录 ${homedir()}/Library/Application Support/gh-runner）`);
+  console.log(`[gh-runner] 已启动（配置目录 ${configDir()}）`);
 }
 
 void main().catch((err) => {

@@ -72,6 +72,8 @@ export class UiHost {
         appMode: true,
         autoHide: false,
         frameless: false,
+        // 原生材质：macOS vibrancy / Windows acrylic——CSS 玻璃在其上才有可折射的背景
+        background: { kind: "semantic", token: "blur", state: "active" },
       },
     });
     this.#window = win;

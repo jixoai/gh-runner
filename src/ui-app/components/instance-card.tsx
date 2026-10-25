@@ -54,8 +54,8 @@ export function InstanceCard({
       onClick={() => onSelect(inst.id)}
       onKeyDown={(e) => e.key === "Enter" && onSelect(inst.id)}
       className={cn(
-        "cursor-pointer gap-2.5 p-3.5 transition-all hover:brightness-[1.03] focus-visible:ring-2",
-        selected && "ring-2 ring-primary/60 shadow-[0_0_0_4px_color-mix(in_oklab,var(--primary)_16%,transparent)]",
+        "glass-card cursor-pointer gap-2.5 rounded-xl border border-white/25 p-3.5 transition-all hover:brightness-[1.03] focus-visible:ring-2 dark:border-white/10",
+        selected && "border-primary/50 bg-primary/8 ring-1 ring-primary/40",
       )}
     >
       <div className="flex items-center gap-2">
@@ -131,15 +131,16 @@ export function InstanceCard({
         #{inst.agentId ?? "—"} · <span className="truncate align-middle">{inst.dir}</span>
       </div>
 
-      <div className="min-h-5 text-xs">
-        {inst.currentJob ? (
+      <div className="grid min-h-5 gap-0.5 text-xs">
+        {inst.currentJob && (
           <span>
             作业中 <b className="text-foreground">{inst.currentJob.job}</b>
             <span className="text-muted-foreground">
               （已运行 {fmtDuration(tick - Date.parse(inst.currentJob.startedAt))}）
             </span>
           </span>
-        ) : inst.lastResult ? (
+        )}
+        {inst.lastResult ? (
           <span>
             最近动作 <b className="text-foreground">{inst.lastResult.job}</b>
             {" → "}
@@ -154,7 +155,7 @@ export function InstanceCard({
             </span>
           </span>
         ) : (
-          <span className="text-muted-foreground/70">暂无作业记录</span>
+          !inst.currentJob && <span className="text-muted-foreground/70">暂无作业记录</span>
         )}
       </div>
 

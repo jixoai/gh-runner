@@ -1,6 +1,6 @@
 {
   "name": "@jixoai/gh-runner",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Menu-bar (tray) manager for multiple GitHub Actions self-hosted runners: discover, register from downloaded/imported packages, start/stop, and live job-result analysis. macOS & Windows.",
   "type": "module",
   "license": "MIT",

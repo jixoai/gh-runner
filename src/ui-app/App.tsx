@@ -44,12 +44,12 @@ export function App() {
       <Glass
         effect="frosted"
         options={{ blur: 20, tintOpacity: 0.05 }}
-        className="flex flex-none items-center gap-3 border-b border-border/70 px-4 py-2.5"
+        className="flex flex-none items-center gap-3 border-b border-white/25 px-4 py-2.5 dark:border-white/10"
       >
         <span className="text-sm font-bold tracking-wide">GH Runner</span>
         <span className="flex-1 truncate text-xs text-muted-foreground">
           {summary
-            ? `${instances.length} 实例 · ${running} 在跑 · ${busy} 作业中`
+            ? `${instances.length} 实例 · ${running} 在线 · ${busy} 作业中`
             : "连接宿主中…"}
         </span>
         <Button size="sm" className="h-7 gap-1 text-xs" onClick={() => setRegisterOpen(true)}>
@@ -61,8 +61,8 @@ export function App() {
       <main className="grid min-h-0 flex-1 grid-cols-[minmax(380px,11fr)_minmax(320px,9fr)]">
         <section className="min-h-0 space-y-2.5 overflow-y-auto p-3">
           {instances.length === 0 ? (
-            <div className="grid h-full place-items-center text-sm text-muted-foreground">
-              尚无实例——点击「注册新实例」开始
+            <div className="grid h-full place-items-center text-sm text-muted-foreground/90">
+              尚无实例——点击右上角「注册新实例」开始
             </div>
           ) : (
             instances.map((inst) => (

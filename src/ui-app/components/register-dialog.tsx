@@ -52,8 +52,13 @@ export function RegisterDialog({
   const packages: PackageInfo[] = summary?.packages ?? [];
   const selectedPkg = form.packagePath || packages.find((p) => p.compatible)?.path || "";
 
+  // 目录已含 .runner = attach（免 Token/名称/Work）；否则全新注册（全部必填）
+  const looksAttach = form.dir.trim().length > 0;
+  const valid =
+    form.dir.trim().length > 0 &&
+    (looksAttach ? true : form.name.trim().length > 0 && form.token.trim().length > 0 && form.workFolder.trim().length > 0);
   const submit = () => {
-    if (!form.dir.trim() || !form.name.trim() || !form.token.trim() || !form.workFolder.trim()) return;
+    if (!valid) return;
     store.send({
       type: "register",
       dir: form.dir.trim(),
@@ -72,15 +77,15 @@ export function RegisterDialog({
         <DialogHeader className="px-5 pt-4">
           <DialogTitle>注册新 runner 实例</DialogTitle>
           <DialogDescription>
-            表单配置后即注册并自动启动；分发包可下载最新或导入本地。
+            表单配置后即注册并自动启动；分发包可下载最新或从本地导入。
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-5 py-4">
-          <Field label="实例目录（必须为空目录）">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-5 py-3.5">
+          <Field label="实例目录（空目录=全新注册；已含 .runner 的目录=接入管理）">
             <Input value={form.dir} onChange={(e) => set("dir")(e.target.value)} placeholder={placeholder.dir} />
           </Field>
-          <Field label="实例名称">
+          <Field label={looksAttach ? "实例名称（接入时忽略，读自 .runner）" : "实例名称"}>
             <Input value={form.name} onChange={(e) => set("name")(e.target.value)} placeholder="mac-ext-05" />
           </Field>
           <Field label="注册 Token（org 设置页生成，一次性）">
@@ -95,11 +100,10 @@ export function RegisterDialog({
               <Button
                 type="button"
                 variant="outline"
-                size="sm"
-                className="h-8 shrink-0 gap-1.5 text-xs"
+                className="h-9 shrink-0 gap-1.5 text-xs"
                 onClick={() => store.send({ type: "open-url", url: RUNNER_NEW_URL })}
               >
-                <ExternalLink className="size-3" /> 获取
+                <ExternalLink className="size-3.5" /> 获取 Token
               </Button>
             </div>
           </Field>
@@ -113,66 +117,74 @@ export function RegisterDialog({
                 }}
               />
             </Field>
-            <Field label="GitHub org URL">
+            <Field label="GitHub Org URL">
               <Input value={form.orgUrl} onChange={(e) => set("orgUrl")(e.target.value)} />
             </Field>
           </div>
           <Field label="Work 目录（必填，独立于其它实例，避免缓存互踩）">
             <Input value={form.workFolder} onChange={(e) => set("workFolder")(e.target.value)} placeholder={placeholder.work} />
           </Field>
-          <Field label="分发包（解包并注册）">
-            <div className="flex items-center gap-2">
-              <Select value={selectedPkg} onValueChange={set("packagePath")}>
-                <SelectTrigger className="min-w-0 flex-1">
-                  <SelectValue placeholder={packages.length === 0 ? "暂无包" : "选择分发包"} />
-                </SelectTrigger>
-                <SelectContent>
-                  {packages.map((pkg) => (
-                    <SelectItem key={pkg.path} value={pkg.path} disabled={!pkg.compatible}>
-                      {pkg.name}（{Math.max(1, Math.round(pkg.sizeBytes / (1 << 20)))} MB）
-                      {pkg.compatible ? "" : " · 不兼容"}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          <Field label="分发包（解包并注册；可下载最新或导入本地包）">
+            <div className="flex min-w-0 items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <Select value={selectedPkg} onValueChange={set("packagePath")}>
+                  <SelectTrigger className="w-full min-w-0" title={selectedPkg}>
+                    <span className="truncate">
+                      {selectedPkg
+                        ? packages.find((p) => p.path === selectedPkg)?.name ?? selectedPkg
+                        : packages.length === 0
+                          ? "暂无包：先下载或导入"
+                          : "选择分发包"}
+                    </span>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {packages.map((pkg) => (
+                      <SelectItem key={pkg.path} value={pkg.path} disabled={!pkg.compatible}>
+                        {pkg.name}（{Math.max(1, Math.round(pkg.sizeBytes / (1 << 20)))} MB）
+                        {pkg.compatible ? "" : " · 不兼容"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <Button
                 type="button"
-                size="sm"
                 variant="outline"
-                className="h-8 shrink-0 gap-1.5 text-xs"
+                className="h-9 shrink-0 gap-1.5 text-xs"
                 disabled={downloading}
+                title="从 actions/runner 官方 release 下载当前平台最新包"
                 onClick={() => store.send({ type: "download-latest" })}
               >
-                {downloading ? <Loader2 className="size-3 animate-spin" /> : <Download className="size-3" />} 最新
+                {downloading ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5" />} 下载最新
               </Button>
               <Button
                 type="button"
-                size="sm"
                 variant="outline"
-                className="h-8 shrink-0 gap-1.5 text-xs"
+                className="h-9 shrink-0 gap-1.5 text-xs"
                 disabled={downloading}
+                title="选择本地包文件（tar.gz / zip）"
                 onClick={() => store.send({ type: "import-package" })}
               >
-                <FolderInput className="size-3" /> 导入…
+                <FolderInput className="size-3.5" /> 导入…
               </Button>
             </div>
             {download && (
-              <div className="mt-2">
+              <div className="mt-1.5">
                 <Progress
                   value={download.status === "running" ? download.pct : download.status === "ok" ? 100 : 0}
                   className={download.status === "error" ? "opacity-40" : ""}
                 />
                 <p
                   className={
-                    "mt-1 text-[11px] " +
+                    "mt-1 text-xs font-medium " +
                     (download.status === "ok"
                       ? "text-ok"
                       : download.status === "error"
                         ? "text-bad"
-                        : "text-muted-foreground")
+                        : "text-foreground")
                   }
                 >
-                  {download.message}
+                  {download.status === "running" ? `下载中 ${download.pct}% — ${download.message}` : download.message}
                 </p>
               </div>
             )}
@@ -183,7 +195,12 @@ export function RegisterDialog({
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={busy}>
             取消
           </Button>
-          <Button size="sm" onClick={submit} disabled={busy}>
+          <Button
+            size="sm"
+            onClick={submit}
+            disabled={busy || downloading || !valid}
+            title={valid ? "" : "全新注册需填：目录 / 名称 / Token / Work 目录"}
+          >
             {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
             {busy ? "注册中…" : "注册并启动"}
           </Button>

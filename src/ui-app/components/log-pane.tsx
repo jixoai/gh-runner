@@ -46,7 +46,7 @@ export function LogPane({
     <Glass
       effect="frosted"
       options={{ blur: 18, tintOpacity: 0.06 }}
-      className="flex h-full min-w-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-log"
+      className="glass-panel flex h-full min-w-0 flex-col overflow-hidden rounded-xl border border-white/25 dark:border-white/10"
     >
       <div className="flex items-center gap-2.5 border-b border-border/60 px-3 py-2 text-xs">
         <span className="min-w-0 flex-1 truncate font-semibold">

@@ -109,6 +109,17 @@ export async function registerRunner(
     if (!dir || !isAbsolutePath(dir)) {
       throw new Error("实例目录必须是绝对路径");
     }
+
+    // Attach 路径：目录已含 .runner（此前注册过的实例）→ 直接接入清单，
+    // 不解包不重注册，也不需要 Token/名称/Work 目录（恢复丢失清单的官方路径）。
+    if (existsSync(join(dir, ".runner"))) {
+      onProgress(`检测到已注册实例（${dir}）→ 接入管理清单`);
+      const meta = await readRunnerMeta(dir);
+      if (!meta.configured) throw new Error(".runner 存在但无法解析（损坏？）");
+      onProgress(`✔ 接入成功：${meta.agentName}（agentId=${meta.agentId}），如需重启请点「启动」`);
+      return { ok: true, error: null, runnerDir: dir };
+    }
+
     if (!req.name.trim()) throw new Error("缺少实例名称");
     if (!req.token.trim()) throw new Error("缺少注册 Token（org 设置页每次生成、一次性）");
     if (!req.workFolder.trim()) throw new Error("缺少 Work 目录（多实例必须各自独立）");
@@ -117,7 +128,10 @@ export async function registerRunner(
     if (existsSync(dir)) {
       entries = await readdir(dir);
       if (entries.some((e) => e !== ".DS_Store")) {
-        throw new Error(`目录非空（${entries.length} 项）：注册必须是空目录；管理已有实例请直接 attach`);
+        throw new Error(
+          `目录非空且无 .runner（${entries.length} 项）：无法安全解包。` +
+            "若是此前注册的实例，请确认目录下有 .runner 文件；否则请换一个空目录。",
+        );
       }
     } else {
       onProgress(`创建目录 ${dir}`);

@@ -114,3 +114,46 @@ describe("registerRunner 流水线", () => {
     expect(result.error).toContain("Token");
   });
 });
+
+describe("registerRunner：attach 已有实例（Windows 数据丢失恢复路径）", () => {
+  it("目录已含 .runner → 直接接入，不解包不重注册", async () => {
+    const attachDir = join(work, "existing");
+    await mkdir(attachDir, { recursive: true });
+    await writeFile(
+      join(attachDir, ".runner"),
+      JSON.stringify({ agentId: 555, agentName: "attach-55" }),
+    );
+    await writeFile(join(attachDir, "some-other-file"), "x");
+    const lines: string[] = [];
+    const result = await registerRunner(
+      {
+        dir: attachDir, name: "ignored", token: "ignored", labels: "", orgUrl: "",
+        workFolder: "", packagePath: null,
+      },
+      [],
+      (l) => lines.push(l),
+    );
+    expect(result.ok).toBe(true);
+    expect(result.error).toBeNull();
+    expect(lines.some((l) => l.includes("接入成功"))).toBe(true);
+    // 未被解包污染
+    const { readdir: ls } = await import("node:fs/promises");
+    expect((await ls(attachDir)).some((e) => e === "bin")).toBe(false);
+  });
+
+  it("目录非空但无 .runner → 明确报错", async () => {
+    const dirty = join(work, "dirty");
+    await mkdir(dirty, { recursive: true });
+    await writeFile(join(dirty, "junk.txt"), "x");
+    const result = await registerRunner(
+      {
+        dir: dirty, name: "x", token: "t", labels: "", orgUrl: "",
+        workFolder: "/tmp/w", packagePath: null,
+      },
+      [],
+      () => {},
+    );
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("无法安全解包");
+  });
+});
