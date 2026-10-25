@@ -53,7 +53,7 @@ export function App() {
             : "连接宿主中…"}
         </span>
         <Button size="sm" className="h-7 gap-1 text-xs" onClick={() => setRegisterOpen(true)}>
-          <Plus className="size-3.5" /> 注册新实例
+          <Plus className="size-3.5" /> 全新注册…
         </Button>
       </Glass>
 

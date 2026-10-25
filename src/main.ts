@@ -217,6 +217,14 @@ async function main(): Promise<void> {
       if (view) void opener.revealInFolder(`${view.dir}/_diag`).catch((err) => console.error("[gh-runner] 揭示目录失败:", err));
     },
     () => pickPackageFile(tray),
+    async () => {
+      try {
+        return await attachDialog(tray).pickDirectory();
+      } catch (err) {
+        console.error("[gh-runner] 目录选择失败:", err);
+        return null;
+      }
+    },
     (url) => opener.open(url),
   );
 

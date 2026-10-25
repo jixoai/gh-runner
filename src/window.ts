@@ -46,6 +46,8 @@ export class UiHost {
     private readonly onOpenDiag: (id: string) => void,
     /** 系统文件选择器（ext-dialog pickFile）；取消/不可用返回 null。 */
     private readonly pickPackageFile: () => Promise<string | null>,
+    /** 系统目录选择器（ext-dialog pickDirectory）；取消返回 null。 */
+    private readonly pickRunnerDir: () => Promise<string | null>,
     /** 默认浏览器打开外部链接（ext-opener open）。 */
     private readonly openExternal: (url: string) => Promise<void>,
   ) {}

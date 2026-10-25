@@ -121,7 +121,7 @@ describe("registerRunner：attach 已有实例（Windows 数据丢失恢复路�
     await mkdir(attachDir, { recursive: true });
     await writeFile(
       join(attachDir, ".runner"),
-      JSON.stringify({ agentId: 555, agentName: "attach-55" }),
+      JSON.stringify({ agentId: 555, agentName: "attach-55", workFolder: "C:\\gh-runner-work-55" }),
     );
     await writeFile(join(attachDir, "some-other-file"), "x");
     const lines: string[] = [];
@@ -136,6 +136,7 @@ describe("registerRunner：attach 已有实例（Windows 数据丢失恢复路�
     expect(result.ok).toBe(true);
     expect(result.error).toBeNull();
     expect(lines.some((l) => l.includes("接入成功"))).toBe(true);
+    expect(lines.some((l) => l.includes("work 目录已恢复"))).toBe(true);
     // 未被解包污染
     const { readdir: ls } = await import("node:fs/promises");
     expect((await ls(attachDir)).some((e) => e === "bin")).toBe(false);

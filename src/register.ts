@@ -116,7 +116,10 @@ export async function registerRunner(
       onProgress(`检测到已注册实例（${dir}）→ 接入管理清单`);
       const meta = await readRunnerMeta(dir);
       if (!meta.configured) throw new Error(".runner 存在但无法解析（损坏？）");
-      onProgress(`✔ 接入成功：${meta.agentName}（agentId=${meta.agentId}），如需重启请点「启动」`);
+      onProgress(
+        `✔ 接入成功：${meta.agentName}（agentId=${meta.agentId}）` +
+          (meta.workFolder ? `，work 目录已恢复：${meta.workFolder}` : ""),
+      );
       return { ok: true, error: null, runnerDir: dir };
     }
 
