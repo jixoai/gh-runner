@@ -45,6 +45,8 @@ export class UiHost {
     private readonly onOpenDiag: (id: string) => void,
     /** 系统文件选择器（ext-dialog pickFile）；取消/不可用返回 null。 */
     private readonly pickPackageFile: () => Promise<string | null>,
+    /** 默认浏览器打开外部链接（ext-opener open）。 */
+    private readonly openExternal: (url: string) => Promise<void>,
   ) {}
 
   async open(): Promise<void> {
@@ -261,6 +263,15 @@ export class UiHost {
       }
       case "open-diag": {
         this.onOpenDiag(cmd.id);
+        break;
+      }
+      case "open-url": {
+        // ext-opener 内建 scheme 白名单（http/https/file/mailto），越界会抛 typed 错误。
+        try {
+          await this.openExternal(cmd.url);
+        } catch (err) {
+          console.error("[gh-runner] 打开链接失败:", err);
+        }
         break;
       }
       case "register": {

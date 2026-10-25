@@ -126,6 +126,7 @@
   .field input:focus { outline: 2px solid color-mix(in srgb, var(--run) 55%, transparent); border-color: transparent; }
   .field .hint { font-size: 10.5px; color: var(--ink-2); }
   .field .hint a { color: var(--run); text-decoration: none; }
+  a.ext-link { cursor: pointer; }
   .pkg-row { display: flex; gap: 6px; }
   .pkg-row select {
     flex: 1; min-width: 0; font: inherit; padding: 5px 7px; border: 1px solid var(--line);
@@ -196,7 +197,7 @@
       <div class="field">
         <label>注册 Token（org 设置页生成，一次性）</label>
         <input name="token" type="password" placeholder="粘贴一次性注册 Token" required>
-        <span class="hint">获取：<a href="https://github.com/organizations/jixoai/settings/actions/runners/new" target="_blank">org runners 新建页</a>（自动解包本机已有分发包）</span>
+        <span class="hint">获取：<a href="#" id="link-runner-new" data-url="https://github.com/organizations/jixoai/settings/actions/runners/new">org runners 新建页</a>（系统浏览器打开；自动解包本机已有分发包）</span>
       </div>
       <div class="field">
         <label>Labels</label>
@@ -329,6 +330,16 @@ function renderPackages(packages, download) {
   }
 }
 
+document.querySelectorAll("a.ext-link").forEach((a) => {
+  a.addEventListener("click", (e) => {
+    e.preventDefault();
+    const url = a.dataset.url;
+    if (!url) return;
+    const ipc = navigator.opentray && navigator.opentray.ipc;
+    if (ipc) void ipc.postMessage({ type: "open-url", url });
+    else window.open(url, "_blank");
+  });
+});
 $("#pkg-download").addEventListener("click", () => send({ type: "download-latest" }));
 $("#pkg-import").addEventListener("click", () => send({ type: "import-package" }));
 document.querySelector('#register-form input[name="labels"]').addEventListener("input", () => {

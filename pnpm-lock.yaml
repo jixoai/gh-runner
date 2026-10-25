@@ -169,6 +169,9 @@ importers:
       '@opentray/ext-dialog':
         specifier: ^0.36.0
         version: 0.36.0(opentray@0.36.0(@gaubee/util@0.35.2))
+      '@opentray/ext-opener':
+        specifier: ^0.36.0
+        version: 0.36.0(opentray@0.36.0(@gaubee/util@0.35.2))
       '@opentray/ext-webview':
         specifier: ^0.36.0
         version: 0.36.0(opentray@0.36.0(@gaubee/util@0.35.2))
@@ -236,6 +239,11 @@ packages:
 
   '@opentray/ext-dialog@0.36.0':
     resolution: {integrity: sha512-QnM4XOypQLlY3Byh59oi/nKobrTKLlmrp6ZpkSj64mWkPaiCW1aEt13ymQV+seEjDqCoPo9LgOTtQC4I4CuCiw==}
+    peerDependencies:
+      opentray: '>=0.0.0'
+
+  '@opentray/ext-opener@0.36.0':
+    resolution: {integrity: sha512-VlK6XRgu03ho6dvXKwE5cRzWJ0PUbd1CbGCZZh+J9I5u8hPFAq4AVDy/knKxK7ZSPbfST8dEfZeHImZYxhjHHA==}
     peerDependencies:
       opentray: '>=0.0.0'
 
@@ -1077,6 +1085,10 @@ snapshots:
     optional: true
 
   '@opentray/ext-dialog@0.36.0(opentray@0.36.0(@gaubee/util@0.35.2))':
+    dependencies:
+      opentray: 0.36.0(@gaubee/util@0.35.2)
+
+  '@opentray/ext-opener@0.36.0(opentray@0.36.0(@gaubee/util@0.35.2))':
     dependencies:
       opentray: 0.36.0(@gaubee/util@0.35.2)
 

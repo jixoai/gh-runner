@@ -66,13 +66,6 @@ export function defaultSearchDirs(): string[] {
   return [homedir()];
 }
 
-/** 在系统文件管理器中揭示目录/文件。 */
-export function revealInFileManager(path: string): { file: string; args: string[] } {
-  if (PLATFORM === "darwin") return { file: "open", args: ["-R", path] };
-  if (IS_WIN) return { file: "explorer", args: [`/select,${path}`] };
-  return { file: "xdg-open", args: [path] };
-}
-
 /** 平台路径分段（win32 反斜杠）。 */
 export function basenameOf(dir: string): string {
   const parts = dir.split(/[\\/]+/).filter(Boolean);

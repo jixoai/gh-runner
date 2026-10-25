@@ -10,22 +10,14 @@
 
 import { homedir } from "node:os";
 import { writeFile } from "node:fs/promises";
-import { execFile } from "node:child_process";
 import { createTray } from "opentray";
 import { attachDialog } from "@opentray/ext-dialog";
+import { attachOpener } from "@opentray/ext-opener";
 import { Fleet } from "./fleet.ts";
 import { TrayProjection } from "./tray.ts";
 import { UiHost, extendWebview } from "./window.ts";
-import { revealInFileManager } from "./platform.ts";
 
 const APP_ID = "com.jixoai.gh-runner";
-
-async function revealPath(path: string): Promise<void> {
-  const { file, args } = revealInFileManager(path);
-  await new Promise<void>((resolve) => {
-    execFile(file, args, () => resolve());
-  });
-}
 
 /** 导入本地分发包：系统文件选择框（ext-dialog；darwin NSOpenPanel / win32 对话框）。 */
 async function pickPackageFile(tray: Awaited<ReturnType<typeof createTray>>): Promise<string | null> {
@@ -215,14 +207,16 @@ async function main(): Promise<void> {
     quit: () => void shutdown(),
   });
   const webviewTray = extendWebview(tray);
+  const opener = attachOpener(tray);
   const uiHost = new UiHost(
     fleet,
     webviewTray,
     (id) => {
       const view = fleet.view(id);
-      if (view) void revealPath(`${view.dir}/_diag`);
+      if (view) void opener.revealInFolder(`${view.dir}/_diag`).catch((err) => console.error("[gh-runner] 揭示目录失败:", err));
     },
     () => pickPackageFile(tray),
+    (url) => opener.open(url),
   );
 
   fleet.onSnapshot((snap) => {

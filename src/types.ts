@@ -126,6 +126,7 @@ export type UiCommand =
   | { type: "stop"; id: string }
   | { type: "set-auto-start"; id: string; value: boolean }
   | { type: "open-diag"; id: string }
+  | { type: "open-url"; url: string }
   | { type: "download-latest" }
   | { type: "import-package" }
   | {
