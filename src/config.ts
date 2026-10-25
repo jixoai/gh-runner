@@ -15,6 +15,10 @@ import type { InstanceConfig, ToolConfig } from "./types.ts";
 export const DEFAULT_SEARCH_DIRS = defaultSearchDirs();
 
 export function configDir(): string {
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA ?? join(homedir(), "AppData", "Roaming");
+    return join(appData, "gh-runner");
+  }
   return join(homedir(), "Library", "Application Support", "gh-runner");
 }
 
@@ -22,12 +26,18 @@ function configPath(): string {
   return join(configDir(), "config.json");
 }
 
-/** 形状校验：损坏的实例项直接丢弃（手编配置/撕裂写的容错），不让 boot 崩掉。 */
+/** 形状校验：损坏的实例项直接丢弃（手编配置/撕裂写的容错），不让 boot 崩掉。
+ *  路径合法性平台无关（POSIX 绝对 / win32 盘符 / UNC 均可）——config 是本机产物，
+ *  但 Windows 盘符路径曾被 startsWith("/") 全量误杀并回写空清单（v0.2.2 实证事故）。 */
+function isAbsoluteish(p: string): boolean {
+  return p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p) || p.startsWith("\\\\");
+}
+
 function validInstance(item: unknown): item is InstanceConfig {
   return (
     typeof item === "object" && item !== null &&
     typeof (item as InstanceConfig).dir === "string" &&
-    (item as InstanceConfig).dir.startsWith("/") &&
+    isAbsoluteish((item as InstanceConfig).dir) &&
     typeof (item as InstanceConfig).id === "string"
   );
 }
