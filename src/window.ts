@@ -17,6 +17,7 @@ import type { CreateTrayHandle } from "opentray";
 import { WebviewExt, type WebviewWindowHandle, type WebviewWindowOptions } from "@opentray/ext-webview";
 import type { Fleet } from "./fleet.ts";
 import type { InstanceView, Snapshot, UiCommand, UiPush } from "./types.ts";
+import { APP_VERSION } from "./version.ts";
 
 const DRAIN_INTERVAL_MS = 150;
 const PUSH_DEBOUNCE_MS = 120;
@@ -67,7 +68,7 @@ export class UiHost {
       html,
       width: 1020,
       height: 700,
-      title: "GH Runner",
+      title: `GH Runner v${APP_VERSION}`,
       nativeWindowApi: true,
       devtools: true,
       style: {
@@ -312,6 +313,22 @@ export class UiHost {
         // 系统文件选择对话框（ext-dialog）；取消返回 null。
         const picked = await this.pickPackageFile();
         if (picked) await this.fleet.importPackage(picked);
+        break;
+      }
+      case "import-runner-dir": {
+        // 导入已有 runner：系统目录选择框 → attach 路径（读 .runner，work 目录随之恢复，免 Token）。
+        const dir = await this.pickRunnerDir();
+        if (dir) {
+          await this.fleet.register({
+            dir,
+            name: "",
+            token: "",
+            labels: "",
+            orgUrl: "",
+            workFolder: "",
+            packagePath: null,
+          });
+        }
         break;
       }
     }

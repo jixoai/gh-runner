@@ -1,4 +1,7 @@
 import { defineConfig } from "tsdown";
+import { readFileSync } from "node:fs";
+
+const pkg = JSON.parse(readFileSync("package.json", "utf8")) as { version: string };
 
 export default defineConfig({
   entry: ["src/main.ts"],
@@ -7,6 +10,7 @@ export default defineConfig({
   platform: "node",
   target: "node22",
   banner: { js: "#!/usr/bin/env node" },
+  define: { __APP_VERSION__: JSON.stringify(pkg.version) },
   // opentray 家族在 dependencies 里，tsdown 默认保持 dependencies external——
   // 平台原生运行时经 optionalDependencies 运行期解析，绝不能打进产物。
 });

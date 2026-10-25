@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Glass } from "solid-glass/react";
-import { Plus } from "lucide-react";
+import { FolderInput, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { InstanceCard } from "@/components/instance-card";
 import { LogPane } from "@/components/log-pane";
@@ -52,8 +52,16 @@ export function App() {
             ? `${instances.length} 实例 · ${running} 在线 · ${busy} 作业中`
             : "连接宿主中…"}
         </span>
+        <Button
+          size="sm"
+          className="h-7 gap-1 text-xs"
+          title="选择已有 runner 的目录（含 .runner），免 Token 接入管理；work 目录自动恢复"
+          onClick={() => store.send({ type: "import-runner-dir" })}
+        >
+          <FolderInput className="size-3.5" /> 导入 runner 目录
+        </Button>
         <Button size="sm" className="h-7 gap-1 text-xs" onClick={() => setRegisterOpen(true)}>
-          <Plus className="size-3.5" /> 全新注册…
+          <Plus className="size-3.5" /> 注册新实例
         </Button>
       </Glass>
 

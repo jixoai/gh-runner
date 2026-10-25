@@ -84,15 +84,16 @@ export async function findListenerProcesses(): Promise<Map<number, string>> {
   if (IS_WIN) {
     const result = new Map<number, string>();
     try {
-      const { stdout } = await exec(
-        "powershell",
-        [
-          "-NoProfile",
-          "-Command",
-          `Get-CimInstance Win32_Process -Filter "Name='Runner.Listener.exe'" | ForEach-Object { "$($_.ProcessId)|$($_.ExecutablePath)" }`,
-        ],
-        { timeout: 15_000 },
-      );
+      // -EncodedCommand（UTF-16LE base64）：绕开 Node→PowerShell 的引号转义地狱——
+      // -Command 里内嵌双引号经 Node 参数转义成 \" 后会被 PS 5.1 截断，静默返回空表
+      //（实证：Windows 上外部 runner 识别不出，GitHub 侧在线、工具侧全停）。
+      const script =
+        `Get-CimInstance Win32_Process -Filter "Name='Runner.Listener.exe'" | ` +
+        `ForEach-Object { "$($_.ProcessId)|$($_.ExecutablePath)" }`;
+      const encoded = Buffer.from(script, "utf16le").toString("base64");
+      const { stdout } = await exec("powershell", ["-NoProfile", "-EncodedCommand", encoded], {
+        timeout: 15_000,
+      });
       for (const line of stdout.split(/\r?\n/)) {
         const m = /^(\d+)\|(.+)$/.exec(line.trim());
         if (!m) continue;

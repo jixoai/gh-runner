@@ -484,15 +484,17 @@ export class Fleet {
   async #reconcileExternal(): Promise<void> {
     const listeners = await findListenerProcesses();
     const cwdByPid = listeners;
-    const dirsRunning = new Set(cwdByPid.values());
+    // win32 身份（ExecutablePath 推导）与实例目录的大小写/分隔符可能不一致，归一后对账。
+    const norm = (p: string): string =>
+      PLATFORM === "win32" ? p.replace(/\\/g, "/").toLowerCase() : p;
+    const dirsRunning = new Set([...cwdByPid.values()].map(norm));
     for (const rt of this.#rts.values()) {
       if (rt.stoppingUntilMs > Date.now()) continue;
       if (rt.child) continue; // 受管：child 事件负责
       // 双侧 realpath 归一（/var ↔ /private/var 等 symlink 差异）。
-      const rtDir = await realpath(rt.dir).catch(() => rt.dir);
+      const rtDir = norm(await realpath(rt.dir).catch(() => rt.dir));
       const externalPid =
-        [...cwdByPid.entries()].find(([, cwd]) => cwd === rtDir)?.[0] ?? null;
-      const isRunning = dirsRunning.has(rtDir);
+        [...cwdByPid.entries()].find(([, cwd]) => norm(cwd) === rtDir)?.[0] ?? null;
       if (externalPid !== null) {
         if (rt.processState !== "running" || rt.external !== true) {
           rt.processState = "running";
@@ -501,7 +503,7 @@ export class Fleet {
           rt.lastError = null;
           this.#emitSoon();
         }
-      } else if (rt.external && rt.processState === "running" && !isRunning) {
+      } else if (rt.external && rt.processState === "running" && !dirsRunning.has(rtDir)) {
         rt.processState = "stopped";
         rt.external = false;
         rt.pid = null;

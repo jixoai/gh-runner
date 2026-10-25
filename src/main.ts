@@ -17,6 +17,7 @@ import { Fleet } from "./fleet.ts";
 import { TrayProjection } from "./tray.ts";
 import { UiHost, extendWebview } from "./window.ts";
 import { appIcon } from "./branding.ts";
+import { APP_VERSION } from "./version.ts";
 
 const APP_ID = "com.jixoai.gh-runner";
 
@@ -249,7 +250,7 @@ async function main(): Promise<void> {
   };
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
-  console.log(`[gh-runner] 已启动（配置目录 ${configDir()}）`);
+  console.log(`[gh-runner] v${APP_VERSION} 已启动（配置目录 ${configDir()}）`);
 }
 
 void main().catch((err) => {

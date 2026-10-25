@@ -51,6 +51,7 @@ export type UiCommand =
   | { type: "open-url"; url: string }
   | { type: "download-latest" }
   | { type: "import-package" }
+  | { type: "import-runner-dir" }
   | {
       type: "register";
       dir: string;
