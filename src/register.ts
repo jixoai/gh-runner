@@ -13,7 +13,14 @@ import { readdir, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { readRunnerMeta } from "./discover.ts";
-import { IS_WIN, registerSpawn, defaultLabels, basenameOf, isAbsolutePath } from "./platform.ts";
+import {
+  IS_WIN,
+  PLATFORM,
+  registerSpawn,
+  defaultLabels,
+  basenameOf,
+  isAbsolutePath,
+} from "./platform.ts";
 
 export interface RegisterRequest {
   dir: string;
@@ -127,7 +134,8 @@ export async function registerRunner(
 
     // bsdtar 自动识别 tar.gz/zip（macOS、Linux、Win10+ 内置）
     await runStep("解包分发包", "tar", ["-xf", pkg], dir, onProgress);
-    if (!IS_WIN) {
+    if (PLATFORM === "darwin") {
+      // quarantine 仅存在于 macOS；Linux 无 xattr 命令，Windows 无此概念
       await runStep(
         "移除 quarantine 隔离标记",
         "xattr",
