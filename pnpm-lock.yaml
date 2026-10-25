@@ -175,6 +175,9 @@ importers:
       '@opentray/ext-webview':
         specifier: ^0.36.0
         version: 0.36.0(opentray@0.36.0(@gaubee/util@0.35.2))
+      '@opentray/icon':
+        specifier: ^0.36.0
+        version: 0.36.0
       opentray:
         specifier: ^0.36.0
         version: 0.36.0(@gaubee/util@0.35.2)

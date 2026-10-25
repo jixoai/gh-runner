@@ -37,9 +37,14 @@ function stateLabel(snapshot: Snapshot, index: number): string {
   }
 }
 
-/** 快照 → 托盘投影器。每次 update() 全量重画图标/tooltip/菜单。 */
+/** 快照 → 托盘投影器。原生托盘接口按内容去重——内容未变绝不重复调用。 */
 export class TrayProjection {
   #instanceIds: string[] = [];
+  // 重复调用原生 setIcon/setTooltip/setMenu 会让应用被反复激活，appMode 窗口随之
+  // "闪出来"（Owner 2026-10-26 实证：一有动静窗口就跳前台）。内容未变时必须静默。
+  #lastIcon: string | null = null;
+  #lastTooltip: string | null = null;
+  #lastMenu: string | null = null;
 
   constructor(
     private readonly tray: CreateTrayHandle,
@@ -52,17 +57,27 @@ export class TrayProjection {
       (i) => i.processState === "running" || i.processState === "starting",
     );
     const busy = running.filter((i) => i.currentJob !== null).length;
-    await this.tray.setIcon({
-      "text-only": busy > 0 ? `▶${running.length}↻${busy}` : `▶${running.length}`,
-    });
-    await this.tray.setTooltip({
+    const iconText = busy > 0 ? `▶${running.length}↻${busy}` : `▶${running.length}`;
+    if (iconText !== this.#lastIcon) {
+      this.#lastIcon = iconText;
+      await this.tray.setIcon({ "text-only": iconText });
+    }
+    const tooltip = JSON.stringify({
       title: "GH Runner",
       description:
         snapshot.instances
           .map((_, index) => `${snapshot.instances[index]!.name}: ${stateLabel(snapshot, index)}`)
           .join("\n") || "尚无实例",
     });
-    await this.tray.setMenu(this.#menuOf(snapshot));
+    if (tooltip !== this.#lastTooltip) {
+      this.#lastTooltip = tooltip;
+      await this.tray.setTooltip(JSON.parse(tooltip));
+    }
+    const menu = JSON.stringify(this.#menuOf(snapshot));
+    if (menu !== this.#lastMenu) {
+      this.#lastMenu = menu;
+      await this.tray.setMenu(JSON.parse(menu));
+    }
   }
 
   /** onMenuClick 事件入口；返回是否已消费。 */

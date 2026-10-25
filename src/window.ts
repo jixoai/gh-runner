@@ -38,6 +38,7 @@ export class UiHost {
   /** 单飞守卫：hello 全量重推与去抖推送并发交错会让同一批日志行重复送达页面。 */
   #pushInFlight = false;
   #pushPending = false;
+  #visible = true;
 
   constructor(
     private readonly fleet: Fleet,
@@ -53,6 +54,9 @@ export class UiHost {
     if (this.#window) {
       await this.#window.show();
       await this.#window.focus();
+      this.#visible = true;
+      this.#logOffsets.clear();
+      void this.#doPush();
       return;
     }
     const htmlPath = join(dirname(fileURLToPath(import.meta.url)), "ui", "index.html");
@@ -73,6 +77,16 @@ export class UiHost {
     this.#window = win;
     await win.show();
     await win.setMinimumSize(720, 520);
+    // 可见性门控：窗口隐藏时完全静默推送——对隐藏窗口的反复原生调用是"一有动静
+    // 窗口就闪出来"的一半帮凶（另一半：托盘投影去重，见 tray.ts）。重新可见即全量重推。
+    win.listen("visibleChange", (event) => {
+      const visible = (event.payload as { visible?: boolean }).visible ?? true;
+      this.#visible = visible;
+      if (visible) {
+        this.#logOffsets.clear();
+        void this.#doPush();
+      }
+    });
     this.#drainTimer = setInterval(() => void this.#drain(), DRAIN_INTERVAL_MS);
     this.#drainTimer.unref?.();
     this.#flush();
@@ -125,7 +139,7 @@ export class UiHost {
   async #doPush(): Promise<void> {
     const win = this.#window;
     const snap = this.#lastSnapshot;
-    if (!win || !snap || win.connectionDead) return;
+    if (!win || !snap || win.connectionDead || !this.#visible) return;
     if (this.#pushInFlight) {
       this.#pushPending = true;
       return;
