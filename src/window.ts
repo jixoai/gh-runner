@@ -6,6 +6,10 @@
  * 1. appMode 主窗口的创建与恢复式显隐（createWebviewWindow 一次性声明，show()/focus() 复用）。
  * 2. 推送协议：summary（实例状态，剔除日志）与 log 增量分通道 evaluate 注入 window.__rfSink；
  *    单次 evaluate 体积控制在 KB 级（实测 ~100KB 全量快照在 WKWebView 路径静默失败）。
+ *    【激活事故 2026-10-27 实证】对隐藏窗口 evaluate 会把它重新显示并抢焦点——这是
+ *    "一有动静窗口就闪出来"的唯一根因（drainIpcMessages/setTooltip/setMenu/setIcon 均
+ *    已 bisect 证实无辜）。Windows 上 X 关闭可能不发 visibleChange，所以可见性以原生
+ *    isVisible() 实证为准（fail-closed），事件只作快路径提示；隐藏期间推送/命令轮询全静默。
  * 3. 命令路由：page→host 经 navigator.opentray.ipc + drainIpcMessages 轮询（150ms）；
  *    hello 触发全量重推（offset 清零），ack 单调记录供 smoke/自愈判定。
  */
@@ -40,6 +44,8 @@ export class UiHost {
   #pushInFlight = false;
   #pushPending = false;
   #visible = true;
+  /** 隐藏期间 isVisible 慢轮询的分频计数（150ms 滴答 ×7 ≈ 1s）。 */
+  #tick = 0;
 
   constructor(
     private readonly fleet: Fleet,
@@ -55,8 +61,15 @@ export class UiHost {
 
   async open(): Promise<void> {
     if (this.#window) {
-      await this.#window.show();
-      await this.#window.focus();
+      try {
+        await this.#window.show();
+        await this.#window.focus();
+      } catch {
+        // Windows 上 X 关闭可能销毁而非隐藏窗口——句柄已死则走重建路径。
+        this.#window = null;
+      }
+    }
+    if (this.#window) {
       this.#visible = true;
       this.#logOffsets.clear();
       void this.#doPush();
@@ -82,18 +95,24 @@ export class UiHost {
     this.#window = win;
     await win.show();
     await win.setMinimumSize(720, 520);
-    // 可见性门控：窗口隐藏时完全静默推送——对隐藏窗口的反复原生调用是"一有动静
-    // 窗口就闪出来"的一半帮凶（另一半：托盘投影去重，见 tray.ts）。重新可见即全量重推。
+    // 可见性门控（fail-closed）：对隐藏窗口的 evaluate 会把它重新激活并抢焦点
+    //（2026-10-27 bisect 实证，evaluate 是唯一有此副作用的宿主原语）。Windows 上
+    // X 关闭可能不发 visibleChange，所以事件只作快路径提示；推送前另有 isVisible 实证。
     win.listen("visibleChange", (event) => {
-      const visible = (event.payload as { visible?: boolean }).visible ?? true;
-      this.#visible = visible;
+      const visible = (event.payload as { visible?: boolean }).visible;
+      this.#visible = typeof visible === "boolean" ? visible : true;
       if (visible) {
         this.#logOffsets.clear();
         void this.#doPush();
       }
     });
-    this.#drainTimer = setInterval(() => void this.#drain(), DRAIN_INTERVAL_MS);
-    this.#drainTimer.unref?.();
+    win.listen("closed", () => {
+      this.#visible = false;
+    });
+    if (!this.#drainTimer) {
+      this.#drainTimer = setInterval(() => void this.#drain(), DRAIN_INTERVAL_MS);
+      this.#drainTimer.unref?.();
+    }
     this.#flush();
   }
 
@@ -144,7 +163,17 @@ export class UiHost {
   async #doPush(): Promise<void> {
     const win = this.#window;
     const snap = this.#lastSnapshot;
-    if (!win || !snap || win.connectionDead || !this.#visible) return;
+    if (!win || !snap || win.connectionDead) return;
+    // 事实核验：事件可能缺位（Windows X 关闭不发 visibleChange），以原生 isVisible 为准。
+    // 已判定隐藏则不再发起任何查询——隐藏期唯一/native 流量是 #drain 的 1s 慢轮询。
+    if (this.#visible) {
+      try {
+        this.#visible = await win.isVisible();
+      } catch {
+        this.#visible = false;
+      }
+    }
+    if (!this.#visible) return;
     if (this.#pushInFlight) {
       this.#pushPending = true;
       return;
@@ -167,6 +196,8 @@ export class UiHost {
       };
       await this.#evaluate(JSON.stringify(summary));
       for (const inst of snap.instances) {
+        // 推送风暴中途窗口被关闭：立即中止余量 evaluate（每一次都可能把窗口拽回前台）。
+        if (!this.#visible) return;
         await this.#pushLogDelta(win, inst.id);
       }
     } finally {
@@ -207,6 +238,7 @@ export class UiHost {
 
     let offset = total - allLines.length;
     for (const lines of chunks) {
+      if (!this.#visible) return; // 风暴中途关窗：余包静默（offset 不前移，复显后全量重推）
       const msg: UiPush = {
         kind: "log",
         seq: ++this.#seq,
@@ -239,6 +271,20 @@ export class UiHost {
   async #drain(): Promise<void> {
     const win = this.#window;
     if (!win || win.connectionDead) return;
+    // 隐藏期全静默（drain 本身无辜，但页面不可见时不可能有命令）；仅 1s 一次实证
+    // isVisible——覆盖"Windows 关窗不发事件"与"用户从任务栏自行复显"两条复显路径。
+    if (!this.#visible) {
+      if (++this.#tick % 7 !== 0) return;
+      try {
+        if (!(await win.isVisible())) return;
+      } catch {
+        return; // 查询失败按隐藏处理：绝不以猜测换取激活风险
+      }
+      this.#visible = true;
+      this.#logOffsets.clear();
+      void this.#doPush();
+      return;
+    }
     let messages;
     try {
       messages = await win.drainIpcMessages();

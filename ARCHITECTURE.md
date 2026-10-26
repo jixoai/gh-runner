@@ -56,6 +56,14 @@
    UI 在此情形弹确认。
 7. **受管 runner detached**：工具退出不杀 runner（与"终端里跑"等价），下次启动自动重连。
    验证模式（--dry-run/--smoke）以 `boot({autoStart:false, persist:false})` 保证零副作用。
+8. **隐藏窗口零 evaluate（2026-10-27 闪窗事故）**：对隐藏窗口 `evaluate` 会把它**重新显示并
+   抢焦点**——bisect 实证 evaluate 是唯一有此副作用的宿主原语（drainIpcMessages/setTooltip/
+   setMenu/setIcon/isVisible/getBounds 均无辜）。Windows 上 X 关闭可能不发 `visibleChange`，
+   所以可见性门控必须 fail-closed：每轮推送前以原生 `isVisible()` 实证（不信事件、缺形状
+   兜底即视为隐藏），隐藏期推送/命令轮询全静默（唯一的 native 流量是 1s 慢轮询探测复显，
+   复显即 offset 清零全量重推）；推送风暴中途发现隐藏立即中止余包。回归锁在
+   `test/window-gating.test.ts`（假句柄模拟事件缺位）。教训：v0.1 的"修好"只是 macOS 上
+   事件恰好工作；门控逻辑信任了事件而非事实，换平台即复发。
 
 ## 文件意图
 

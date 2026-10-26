@@ -41,8 +41,9 @@ function stateLabel(snapshot: Snapshot, index: number): string {
 /** 快照 → 托盘投影器。原生托盘接口按内容去重——内容未变绝不重复调用。 */
 export class TrayProjection {
   #instanceIds: string[] = [];
-  // 重复调用原生 setIcon/setTooltip/setMenu 会让应用被反复激活，appMode 窗口随之
-  // "闪出来"（Owner 2026-10-26 实证：一有动静窗口就跳前台）。内容未变时必须静默。
+  // 托盘调用去重：2026-10-27 bisect 实证 setIcon/setTooltip/setMenu（含内容变化时）
+  // 不会激活隐藏窗口（闪窗唯一根因是对隐藏窗口 evaluate，见 window.ts）——去重保留为
+  // 调用卫生（省原生往返），不再承担闪窗修复职责。
   #lastIcon: string | null = null;
   #platform: string = process.platform;
   #lastTooltip: string | null = null;
