@@ -118,6 +118,18 @@ export class Fleet {
     return () => this.#listeners.delete(listener);
   }
 
+  /** 宿主侧选择器（ext-dialog）失败的可见反馈：写进 task 通道，UI 以 toast 呈现。
+   *  此前只 console.error——受限环境（无 GUI 会话/osascript 被禁）下用户点按钮毫无响应。 */
+  reportPickerFailure(what: string, err: unknown, hint?: string): void {
+    const detail = err instanceof Error ? err.message : String(err);
+    this.#task = {
+      kind: "register",
+      status: "error",
+      message: hint ? `${what}失败：${detail}。${hint}` : `${what}失败：${detail}`,
+    };
+    this.#emit();
+  }
+
   snapshot(): Snapshot {
     this.#seq += 1;
     return {

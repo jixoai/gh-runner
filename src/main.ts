@@ -30,7 +30,7 @@ const APP_ID = "com.jixoai.gh-runner";
 // dist/main.mjs 的上一级即本包根，manifest 恒有 name。
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** 导入本地分发包：系统文件选择框（ext-dialog；darwin NSOpenPanel / win32 对话框）。 */
+/** 导入本地分发包：系统文件选择器（ext-dialog；darwin NSOpenPanel / win32 对话框）。 */
 async function pickPackageFile(tray: Awaited<ReturnType<typeof createTray>>): Promise<string | null> {
   try {
     const dialog = attachDialog(tray);
@@ -40,9 +40,17 @@ async function pickPackageFile(tray: Awaited<ReturnType<typeof createTray>>): Pr
     return typeof picked === "string" ? picked : null;
   } catch (err) {
     console.error("[gh-runner] 包选择失败:", err);
+    reportPickerFailure(
+      "本地包选择",
+      err,
+      "可直接用「下载最新」获取官方包；或把包路径所在目录提前导入",
+    );
     return null;
   }
 }
+
+/** 选择器失败要可见：UI 经 fleet task 通道 toast（受限环境/桥接失败时用户不再面对无响应按钮）。 */
+let reportPickerFailure: (what: string, err: unknown, hint?: string) => void = () => {};
 
 /** --probe：探明真实窗口里注入的页面桥形态。三通道取证：页面 ipc 上行 / 宿主 evaluate 内省 +
  *  titlechange 回传 / loadstate 时机观测。 */
@@ -166,6 +174,7 @@ async function main(): Promise<void> {
     return;
   }
   const fleet = new Fleet();
+  reportPickerFailure = (what, err, hint) => fleet.reportPickerFailure(what, err, hint);
   // 验证模式（--dry-run/--smoke）绝不产生副作用：不 autoStart、不写配置。
   await fleet.boot(
     mode === "--dry-run" || mode === "--smoke"
@@ -232,6 +241,11 @@ async function main(): Promise<void> {
         return await attachDialog(tray).pickDirectory();
       } catch (err) {
         console.error("[gh-runner] 目录选择失败:", err);
+        reportPickerFailure(
+          "runner 目录选择",
+          err,
+          "可直接打开「注册新实例」，在目录栏粘贴 runner 目录路径（含 .runner 时自动接入，免 Token）",
+        );
         return null;
       }
     },
