@@ -9,7 +9,9 @@
  */
 
 import { writeFile } from "node:fs/promises";
-import { createTray } from "opentray";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { createTray, type OpenTrayRuntimeOptions } from "opentray";
 import { attachDialog } from "@opentray/ext-dialog";
 import { attachOpener } from "@opentray/ext-opener";
 import { configDir } from "./config.ts";
@@ -20,6 +22,13 @@ import { appIcon } from "./branding.ts";
 import { APP_VERSION } from "./version.ts";
 
 const APP_ID = "com.jixoai.gh-runner";
+
+// 显式包身份：opentray 0.36.0 运行时支持 packageRoot（connectLocalBroker 首选读取）但
+// 类型未声明。不提供时 darwin 会从入口目录向上遍历 package.json——npx 缓存根是 npm
+// 生成的无名 manifest，readManifestIdentity 对"存在但缺 name"硬抛 OpenTrayPackageIdentityError
+//（Owner 2026-10-27 全新 Mac npx 启动即崩实证；Windows 不走该分支所以无恙）。
+// dist/main.mjs 的上一级即本包根，manifest 恒有 name。
+const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** 导入本地分发包：系统文件选择框（ext-dialog；darwin NSOpenPanel / win32 对话框）。 */
 async function pickPackageFile(tray: Awaited<ReturnType<typeof createTray>>): Promise<string | null> {
@@ -196,7 +205,7 @@ async function main(): Promise<void> {
       icon: { "text-only": "▶…" },
       menu: { items: [{ type: "item", id: 1, title: "打开控制面板", primaryEvent: true }] },
     },
-    { appId: APP_ID, appName: "GH Runner", appIcon: appIcon() },
+    { appId: APP_ID, appName: "GH Runner", appIcon: appIcon(), packageRoot } as OpenTrayRuntimeOptions,
   );
 
   const projection = new TrayProjection(tray, {

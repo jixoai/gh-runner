@@ -64,6 +64,14 @@
    复显即 offset 清零全量重推）；推送风暴中途发现隐藏立即中止余包。回归锁在
    `test/window-gating.test.ts`（假句柄模拟事件缺位）。教训：v0.1 的"修好"只是 macOS 上
    事件恰好工作；门控逻辑信任了事件而非事实，换平台即复发。
+9. **显式包身份（2026-10-27 npx 启动崩溃）**：darwin 上 `createTray` 会从入口目录向上遍历
+   找 package.json 推导包身份（`resolveOpenTrayPackageIdentity`），且 `readManifestIdentity`
+   对"存在但缺 name"的 manifest **硬抛**而非跳过——npx 缓存根（`_npx/<hash>/package.json`）
+   恰是 npm 生成的无名 manifest，于是 `npx @jixoai/gh-runner` 在全新 Mac 上启动即崩
+   （Windows 不走此 darwin-only 分支，所以"Windows 跑不会"）。修法：runtimeOptions 传
+   `packageRoot`（入口文件的上一级，本包 manifest 恒有 name；0.36.0 实现首选读取该显式
+   身份、类型未声明，窄断言 + 注释）。该身份决定 `~/.opentray/apps/<encoded-name>/` 的
+   稳定 bundle 路径，显式传入与既有解析结果一致，老安装不受影响。
 
 ## 文件意图
 
