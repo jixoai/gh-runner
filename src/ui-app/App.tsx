@@ -94,7 +94,7 @@ export function App() {
         </section>
       </main>
 
-      <RegisterDialog open={registerOpen} onOpenChange={setRegisterOpen} summary={summary} />
+      {registerOpen && <RegisterDialog open onOpenChange={setRegisterOpen} summary={summary} />}
       <Toaster position="top-center" richColors closeButton />
     </div>
   );

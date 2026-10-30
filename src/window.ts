@@ -193,6 +193,9 @@ export class UiHost {
         }),
         packages: snap.packages,
         download: snap.download,
+        authorization: snap.authorization,
+        registrationDefaults: snap.registrationDefaults,
+        registrationBatch: snap.registrationBatch,
       };
       await this.#evaluate(JSON.stringify(summary));
       for (const inst of snap.instances) {
@@ -294,7 +297,7 @@ export class UiHost {
     }
     for (const message of messages) {
       if (process.env.RF_DEBUG) {
-        console.error("[ui] ipc <-", JSON.stringify(message.payload).slice(0, 120));
+        console.error("[ui] ipc <-", (message.payload as { type?: string } | null)?.type);
       }
       const cmd = message.payload as UiCommand | null;
       if (!cmd || typeof cmd !== "object") continue;
@@ -340,7 +343,7 @@ export class UiHost {
         break;
       }
       case "register": {
-        await this.fleet.register({
+        const request = {
           dir: cmd.dir,
           name: cmd.name,
           token: cmd.token,
@@ -348,7 +351,19 @@ export class UiHost {
           orgUrl: cmd.orgUrl,
           workFolder: cmd.workFolder,
           packagePath: cmd.packagePath,
-        });
+        };
+        cmd.token = "";
+        void this.fleet.register(request).catch((error) => this.fleet.reportPickerFailure("注册", error)).finally(() => { request.token = ""; });
+        break;
+      }
+      case "register-batch": {
+        const request = { ...cmd };
+        cmd.token = "";
+        void this.fleet.registerBatch(request);
+        break;
+      }
+      case "cancel-authorization": {
+        this.fleet.cancelAuthorization();
         break;
       }
       case "download-latest": {

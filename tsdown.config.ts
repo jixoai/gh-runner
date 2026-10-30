@@ -10,7 +10,10 @@ export default defineConfig({
   platform: "node",
   target: "node22",
   banner: { js: "#!/usr/bin/env node" },
-  define: { __APP_VERSION__: JSON.stringify(pkg.version) },
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+    __GITHUB_APP_CLIENT_ID__: JSON.stringify(process.env.GH_RUNNER_GITHUB_CLIENT_ID ?? ""),
+  },
   // opentray 家族在 dependencies 里，tsdown 默认保持 dependencies external——
   // 平台原生运行时经 optionalDependencies 运行期解析，绝不能打进产物。
 });

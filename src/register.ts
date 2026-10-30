@@ -47,11 +47,16 @@ async function runStep(
   args: string[],
   cwd: string,
   onProgress: ProgressSink,
-  timeoutMs = 300_000,
+  token = "",
 ): Promise<void> {
+  const timeoutMs = 300_000;
   onProgress(`$ ${title}`);
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(file, args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(file, args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: token ? { ...process.env, ACTIONS_RUNNER_INPUT_TOKEN: token } : process.env,
+    });
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
       reject(new Error(`${title} 超时（${timeoutMs / 1000}s）`));
@@ -64,7 +69,9 @@ async function runStep(
         partial += chunk;
         const lines = partial.split(/\r?\n/);
         partial = lines.pop() ?? "";
-        for (const l of lines) if (l.trim()) onProgress(`  ${l.trim()}`);
+        for (const line of lines) {
+          if (line.trim()) onProgress(`  ${token ? line.trim().replaceAll(token, "[已隐藏]") : line.trim()}`);
+        }
       });
     }
     child.on("error", (err) => {
@@ -99,6 +106,21 @@ export async function findTarball(searchDirs: string[]): Promise<string | null> 
   return null;
 }
 
+export async function validateNewRunner(req: RegisterRequest, searchDirs: string[]): Promise<string> {
+  if (!req.dir || !isAbsolutePath(req.dir)) throw new Error("实例目录必须是绝对路径");
+  if (!req.name.trim()) throw new Error("缺少实例名称");
+  if (!req.workFolder.trim() || !isAbsolutePath(req.workFolder)) throw new Error("Work 目录必须是独立的绝对路径");
+  if (existsSync(req.dir)) {
+    const entries = await readdir(req.dir);
+    if (entries.some((entry) => entry !== ".DS_Store")) {
+      throw new Error(`目录非空且无可用于全新注册的空目录（${req.dir}）：无法安全解包。已有实例请使用「导入 runner 目录」；否则请选择空目录。`);
+    }
+  }
+  const pkg = req.packagePath?.trim() || await findTarball(searchDirs);
+  if (!pkg || !existsSync(pkg)) throw new Error("未选定分发包：请下载最新版或导入本地包");
+  return pkg;
+}
+
 export async function registerRunner(
   req: RegisterRequest,
   searchDirs: string[],
@@ -123,30 +145,13 @@ export async function registerRunner(
       return { ok: true, error: null, runnerDir: dir };
     }
 
-    if (!req.name.trim()) throw new Error("缺少实例名称");
-    if (!req.token.trim()) throw new Error("缺少注册 Token（org 设置页每次生成、一次性）");
-    if (!req.workFolder.trim()) throw new Error("缺少 Work 目录（多实例必须各自独立）");
-
-    let entries: string[] = [];
-    if (existsSync(dir)) {
-      entries = await readdir(dir);
-      if (entries.some((e) => e !== ".DS_Store")) {
-        throw new Error(
-          `目录非空且无 .runner（${entries.length} 项）：无法安全解包。` +
-            "若是此前注册的实例，请确认目录下有 .runner 文件；否则请换一个空目录。",
-        );
-      }
-    } else {
+    if (!req.token.trim()) throw new Error("缺少 runner 注册 Token（有效期 1 小时）");
+    const pkg = await validateNewRunner(req, searchDirs);
+    if (!existsSync(dir)) {
       onProgress(`创建目录 ${dir}`);
       await mkdir(dir, { recursive: true });
     }
 
-    const pkg = req.packagePath?.trim()
-      ? req.packagePath.trim()
-      : (await findTarball(searchDirs));
-    if (!pkg || !existsSync(pkg)) {
-      throw new Error("未选定分发包：请下载最新版或导入本地包");
-    }
     onProgress(`使用分发包 ${basenameOf(pkg)}`);
 
     // bsdtar 自动识别 tar.gz/zip（macOS、Linux、Win10+ 内置）
@@ -173,8 +178,6 @@ export async function registerRunner(
         ...reg.prefixArgs,
         "--url",
         req.orgUrl.trim() || "https://github.com/jixoai",
-        "--token",
-        req.token.trim(),
         "--name",
         req.name.trim(),
         "--labels",
@@ -185,6 +188,7 @@ export async function registerRunner(
       ],
       dir,
       onProgress,
+      req.token.trim(),
     );
 
     const meta = await readRunnerMeta(dir);

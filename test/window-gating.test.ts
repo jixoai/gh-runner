@@ -166,4 +166,20 @@ describe("UiHost 可见性门控（闪窗回归）", () => {
     expect(f.win.drainIpcMessages.mock.calls.length).toBe(0); // 全静默
     expect(f.win.isVisible.mock.calls.length).toBeGreaterThan(0); // 但复显探测仍在
   });
+
+  it("批量授权等待时 IPC 仍可接收取消命令，不记录或保留命令中的 Token", async () => {
+    const f = fakeWindow();
+    const fleet = { registerBatch: vi.fn(() => new Promise<void>(() => {})), cancelAuthorization: vi.fn() };
+    const ui = new UiHost(fleet as never, { createWebviewWindow: () => f.win } as never, () => {}, async () => null, async () => null, async () => {});
+    await ui.open();
+    const command = { type: "register-batch", method: "token", clientId: "", token: "DO_NOT_LOG", targetUrl: "https://github.com/acme", packagePath: "/tmp/pkg", runners: [] };
+    f.win.drainIpcMessages.mockResolvedValueOnce([{ payload: command }]);
+    await vi.advanceTimersByTimeAsync(160);
+    expect(fleet.registerBatch).toHaveBeenCalledOnce();
+    expect(command.token).toBe("");
+    f.win.drainIpcMessages.mockResolvedValueOnce([{ payload: { type: "cancel-authorization" } }]);
+    await vi.advanceTimersByTimeAsync(160);
+    expect(fleet.cancelAuthorization).toHaveBeenCalledOnce();
+    await ui.destroy();
+  });
 });

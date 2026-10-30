@@ -4,6 +4,7 @@
  */
 
 import { store, type UiCommand } from "./lib/host";
+import type { AuthorizationState, RegistrationBatchState } from "../types.ts";
 
 interface DemoInstance {
   id: string;
@@ -84,6 +85,9 @@ const packages = [
   { path: "/Users/kzf/Downloads/actions-runner-win-x64-2.339.0.zip", name: "actions-runner-win-x64-2.339.0.zip", sizeBytes: 198 * 1024 * 1024, mtimeMs: now - 86_400_000, compatible: false },
 ];
 let download: { status: "running" | "ok" | "error"; pct: number; message: string } | null = null;
+let authorization: AuthorizationState | null = null;
+let registrationBatch: RegistrationBatchState | null = null;
+let pendingBatch: Extract<UiCommand, { type: "register-batch" }> | null = null;
 
 const task = { kind: "none", status: "ok", message: null } as {
   kind: "none" | "register";
@@ -113,6 +117,9 @@ function sink(): void {
     instances: instances.map(({ log: _log, ...rest }) => structuredClone(rest)),
     packages: structuredClone(packages),
     download: download ? { ...download } : null,
+    authorization: authorization ? { ...authorization } : null,
+    registrationBatch: structuredClone(registrationBatch),
+    registrationDefaults: { parentDir: "/Users/demo/actions-runners", name: "mac-build", clientId: "demo-github-app" },
   });
   for (const inst of instances) {
     const sent = logSent.get(inst.id) ?? 0;
@@ -124,6 +131,44 @@ function sink(): void {
 }
 
 export const demoHost = {
+  authorize(): void {
+    const command = pendingBatch;
+    if (!command || !registrationBatch) return;
+    pendingBatch = null;
+    authorization = { status: "registering", message: "演示：临时账号凭据已释放，正在逐个创建…" };
+    let index = 0;
+    const advance = () => {
+      const item = registrationBatch?.items[index];
+      const runner = command.runners[index];
+      if (!item || !runner) {
+        command.token = "";
+        if (registrationBatch) registrationBatch.credentialsCleared = true;
+        authorization = { status: "cleared", message: "演示：本机临时凭据已清理" };
+        task.status = "ok";
+        task.message = `${command.runners.length} 个 runner 已创建（演示）`;
+        sink();
+        return;
+      }
+      item.status = "registering";
+      item.message = "解包并注册（演示）…";
+      sink();
+      setTimeout(() => {
+        const fresh = mk(`demo-${Date.now()}-${index}`, runner.name, {});
+        fresh.processState = "running";
+        fresh.external = false;
+        fresh.pid = 42000 + index;
+        fresh.dir = runner.dir;
+        fresh.workFolder = runner.workFolder;
+        fresh.orgUrl = command.targetUrl;
+        instances.push(fresh);
+        item.status = "ok";
+        item.message = "已注册并启动（演示）";
+        index += 1;
+        advance();
+      }, 600);
+    };
+    advance();
+  },
   command(cmd: UiCommand): void {
     if (cmd.type === "ack" || cmd.type === "hello") return;
     const inst = "id" in cmd ? instances.find((i) => i.id === cmd.id) : undefined;
@@ -153,6 +198,29 @@ export const demoHost = {
       inst.external = false;
     }
     if (cmd.type === "set-auto-start" && inst) inst.autoStart = cmd.value;
+    if (cmd.type === "register-batch") {
+      task.kind = "register";
+      task.status = "running";
+      task.message = "等待手机授权（演示）";
+      registrationBatch = { requestId: cmd.requestId, credentialsCleared: false, items: cmd.runners.map((runner) => ({ name: runner.name, dir: runner.dir, status: "pending", message: "等待注册" })) };
+      pendingBatch = { ...cmd, token: "" };
+      cmd.token = "";
+      authorization = { status: "waiting", userCode: "DEMO-2026", verificationUri: "https://github.com/login/device", expiresAt: Date.now() + 900_000, message: "演示：请使用模拟确认按钮" };
+      if (cmd.method === "token") demoHost.authorize();
+    }
+    if (cmd.type === "cancel-authorization" && pendingBatch) {
+      pendingBatch = null;
+      authorization = { status: "cancelled", message: "授权已取消（演示）" };
+      if (registrationBatch) {
+        registrationBatch.credentialsCleared = true;
+        for (const item of registrationBatch.items) {
+          item.status = "error";
+          item.message = "已取消，未创建（演示）";
+        }
+      }
+      task.status = "error";
+      task.message = "授权已取消（演示）";
+    }
     if (cmd.type === "download-latest") {
       if (download && download.status === "running") return;
       download = { status: "running", pct: 0, message: "下载 actions-runner-osx-arm64-2.340.0.tar.gz（演示）" };

@@ -3,6 +3,9 @@
  * 命令上行（navigator.opentray.ipc / 演示模式降级）。React 经 useSyncExternalStore 订阅。
  */
 
+import type { UiCommand, UiPush } from "../../types.ts";
+export type { UiCommand } from "../../types.ts";
+
 export interface InstanceView {
   id: string;
   dir: string;
@@ -29,39 +32,7 @@ export interface PackageInfo {
   compatible: boolean;
 }
 
-export interface SummaryPush {
-  kind: "summary";
-  seq: number;
-  now: string;
-  platform: string;
-  arch: string;
-  task: { kind: "register" | "none"; status: "running" | "ok" | "error"; message: string | null };
-  instances: InstanceView[];
-  packages: PackageInfo[];
-  download: { status: "running" | "ok" | "error"; pct: number; message: string } | null;
-}
-
-export type UiCommand =
-  | { type: "hello" }
-  | { type: "ack"; seq: number }
-  | { type: "start"; id: string }
-  | { type: "stop"; id: string }
-  | { type: "set-auto-start"; id: string; value: boolean }
-  | { type: "open-diag"; id: string }
-  | { type: "open-url"; url: string }
-  | { type: "download-latest" }
-  | { type: "import-package" }
-  | { type: "import-runner-dir" }
-  | {
-      type: "register";
-      dir: string;
-      name: string;
-      token: string;
-      labels: string;
-      orgUrl: string;
-      workFolder: string;
-      packagePath: string;
-    };
+export type SummaryPush = Extract<UiPush, { kind: "summary" }>;
 
 const EMPTY_LOGS: string[] = [];
 

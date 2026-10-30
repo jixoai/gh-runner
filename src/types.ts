@@ -88,6 +88,41 @@ export interface ReleaseInfo {
   sizeBytes: number;
 }
 
+export interface AuthorizationState {
+  status: "requesting" | "waiting" | "exchanging" | "registering" | "cleared" | "error" | "cancelled";
+  userCode?: string;
+  verificationUri?: string;
+  expiresAt?: number;
+  message: string;
+}
+
+export interface RegistrationDefaults {
+  parentDir: string;
+  name: string;
+  clientId: string;
+}
+
+export interface BatchRegistrationRequest {
+  requestId?: string;
+  method: "github" | "token";
+  clientId: string;
+  token: string;
+  targetUrl: string;
+  packagePath: string;
+  runners: { dir: string; name: string; labels: string; workFolder: string }[];
+}
+
+export interface RegistrationBatchState {
+  requestId?: string;
+  credentialsCleared: boolean;
+  items: {
+    name: string;
+    dir: string;
+    status: "pending" | "registering" | "ok" | "error";
+    message: string;
+  }[];
+}
+
 export interface Snapshot {
   seq: number;
   now: string;
@@ -100,6 +135,9 @@ export interface Snapshot {
   packages: PackageInfo[];
   /** 进行中/刚完成的最新包下载（null=无）。 */
   download: DownloadState | null;
+  authorization?: AuthorizationState | null;
+  registrationDefaults?: RegistrationDefaults;
+  registrationBatch?: RegistrationBatchState | null;
 }
 
 /** 宿主 → 页面 推送（经 evaluate 注入 window.__rfSink）。summary 与 log 增量分通道，
@@ -115,6 +153,9 @@ export type UiPush =
       instances: Omit<InstanceView, "log">[];
       packages: PackageInfo[];
       download: DownloadState | null;
+      authorization?: AuthorizationState | null;
+      registrationDefaults?: RegistrationDefaults;
+      registrationBatch?: RegistrationBatchState | null;
     }
   | { kind: "log"; seq: number; id: string; from: number; truncated: boolean; lines: string[] };
 
@@ -130,6 +171,8 @@ export type UiCommand =
   | { type: "download-latest" }
   | { type: "import-package" }
   | { type: "import-runner-dir" }
+  | { type: "cancel-authorization" }
+  | ({ type: "register-batch" } & BatchRegistrationRequest)
   | {
       type: "register";
       dir: string;

@@ -20,6 +20,7 @@ const lines: string[] = [];
 const onProgress: ProgressSink = (l) => lines.push(l);
 
 beforeEach(async () => {
+  lines.length = 0;
   work = await mkdtemp(join(tmpdir(), "rf-reg-pkg-"));
   // 伪造包内容：actions-runner/{bin/run.sh, config.sh}；config.sh 把参数写进文件并生成 .runner
   const staging = join(work, "staging", "actions-runner");
@@ -35,6 +36,8 @@ beforeEach(async () => {
       "#!/bin/bash",
       'args_file="$(pwd)/config-args.txt"',
       'echo "$@" > "$args_file"',
+      'printf "%s" "$ACTIONS_RUNNER_INPUT_TOKEN" > registration-token.txt',
+      'echo "token=$ACTIONS_RUNNER_INPUT_TOKEN"',
       'cat > "$(pwd)/.runner" <<EOF',
       '{"agentId": 777, "agentName": "pkg-ext-77", "gitHubUrl": "https://github.com/jixoai", "workFolder": "/tmp/pkg-work"}',
       "EOF",
@@ -79,8 +82,11 @@ describe("registerRunner 流水线", () => {
     expect(meta.agentName).toBe("pkg-ext-77");
 
     const args = (await readFile(join(targetDir, "config-args.txt"), "utf8")).split(/\s+/);
-    expect(args).toContain("--token");
-    expect(args).toContain("TESTTOKEN123");
+    expect(args).not.toContain("--token");
+    expect(args).not.toContain("TESTTOKEN123");
+    expect(await readFile(join(targetDir, "registration-token.txt"), "utf8")).toBe("TESTTOKEN123");
+    expect(lines.join("\n")).not.toContain("TESTTOKEN123");
+    expect(lines.join("\n")).toContain("[已隐藏]");
     expect(args).toContain("--work");
     expect(args).toContain("/tmp/pkg-work");
 

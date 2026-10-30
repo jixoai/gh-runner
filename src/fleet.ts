@@ -9,7 +9,8 @@
  * 4. 快照发射：变更去抖后全量推送（seq 单调递增）。
  */
 
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { homedir, hostname } from "node:os";
 import { existsSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { DirTail } from "./tailer.ts";
@@ -29,7 +30,9 @@ import {
   type SpawnedRunner,
 } from "./supervisor.ts";
 import { loadConfig, saveConfig, upsertInstance } from "./config.ts";
-import { registerRunner, type RegisterRequest } from "./register.ts";
+import { registerRunner, validateNewRunner, type RegisterRequest } from "./register.ts";
+import { authorizeRunners, githubClientId } from "./github-auth.ts";
+import { parseRunnerTarget } from "./github-target.ts";
 import {
   listPackages,
   fetchLatestReleaseInfo,
@@ -44,12 +47,28 @@ import type {
   ProcessState,
   Snapshot,
   ToolConfig,
+  AuthorizationState,
+  BatchRegistrationRequest,
+  RegistrationBatchState,
 } from "./types.ts";
 
 const LOG_RING_MAX = 400;
 const DEDUP_MAX = 2400;
 const TICK_MS = 2000;
 const DEBOUNCE_MS = 200;
+
+async function canonicalRegistrationPath(path: string): Promise<string> {
+  const absolute = resolve(path);
+  const existing = await realpath(absolute).catch(() => null);
+  if (existing) return existing.replace(/[\\/]+/g, "/").replace(/\/$/, "").toLowerCase();
+  const parent = dirname(absolute);
+  if (parent === absolute) return absolute.toLowerCase();
+  return `${await canonicalRegistrationPath(parent)}/${basename(absolute).toLowerCase()}`;
+}
+
+function pathsOverlap(first: string, second: string): boolean {
+  return first === second || first.startsWith(`${second}/`) || second.startsWith(`${first}/`);
+}
 
 export interface BootOptions {
   /** 启动时自动拉起 autoStart 实例；--dry-run/--smoke 等验证模式必须传 false（保持无副作用）。 */
@@ -93,6 +112,9 @@ export class Fleet {
   #persist = true;
   #download: DownloadState | null = null;
   #downloading = false;
+  #authorization: AuthorizationState | null = null;
+  #registrationBatch: RegistrationBatchState | null = null;
+  #authController: AbortController | null = null;
 
   async boot(options: BootOptions = {}): Promise<void> {
     this.#persist = options.persist ?? true;
@@ -143,6 +165,13 @@ export class Fleet {
       task: this.#task,
       packages: this.#packages,
       download: this.#download,
+      authorization: this.#authorization ? { ...this.#authorization } : null,
+      registrationBatch: this.#registrationBatch ? structuredClone(this.#registrationBatch) : null,
+      registrationDefaults: {
+        parentDir: join(homedir(), "actions-runners"),
+        name: hostname().replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 40) || "runner",
+        clientId: githubClientId(),
+      },
     };
   }
 
@@ -334,6 +363,8 @@ export class Fleet {
 
   async register(req: RegisterRequest): Promise<void> {
     if (this.#task.kind === "register" && this.#task.status === "running") return;
+    this.#registrationBatch = null;
+    this.#authorization = null;
     this.#task = { kind: "register", status: "running", message: null };
     this.#emit();
     const existing = this.#rts.get(instanceIdOf(req.dir));
@@ -362,7 +393,146 @@ export class Fleet {
     this.#emit();
   }
 
+  cancelAuthorization(): void {
+    if (this.#authorization?.status === "registering") return;
+    this.#authController?.abort();
+  }
+
+  async registerBatch(input: BatchRegistrationRequest): Promise<void> {
+    if (this.#task.kind === "register" && this.#task.status === "running") {
+      input.token = "";
+      return;
+    }
+    this.#task = { kind: "register", status: "running", message: "检查配置与目录…" };
+    this.#authorization = null;
+    this.#registrationBatch = { requestId: input.requestId, credentialsCleared: false, items: [] };
+    const controller = new AbortController();
+    this.#authController = controller;
+    let tokens: string[] = [];
+    this.#emit();
+    try {
+      if (!Array.isArray(input.runners) || input.runners.length < 1 || input.runners.length > 10) {
+        throw new Error("每批可创建 1–10 个 runner");
+      }
+      if (input.method !== "github" && input.method !== "token") throw new Error("请选择授权方式");
+      const target = parseRunnerTarget(input.targetUrl);
+      const requests = input.runners.map((runner) => ({
+        ...runner,
+        dir: runner.dir.trim(),
+        name: runner.name.trim(),
+        workFolder: runner.workFolder.trim(),
+        token: "",
+        orgUrl: target.url,
+        packagePath: input.packagePath,
+      }));
+      const names = new Set<string>();
+      const paths: { path: string; owner: string }[] = [];
+      for (const req of requests) {
+        if (!/^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*$/.test(req.name)) throw new Error("实例名称仅支持字母、数字、短横线、下划线和点，且不能以点开头");
+        if (names.has(req.name.toLowerCase())) throw new Error(`实例名称重复：${req.name}`);
+        names.add(req.name.toLowerCase());
+        for (const path of [req.dir, req.workFolder]) {
+          const canonical = await canonicalRegistrationPath(path);
+          if (paths.some((used) => used.path === canonical || (used.owner !== req.name && pathsOverlap(used.path, canonical)))) {
+            throw new Error("每个 runner 必须使用独立且不与其他实例嵌套的实例目录和 Work 目录");
+          }
+          paths.push({ path: canonical, owner: req.name });
+        }
+        for (const rt of this.#rts.values()) {
+          if (rt.meta?.gitHubUrl?.replace(/\/$/, "").toLowerCase() === target.url.toLowerCase() && rt.meta.agentName?.toLowerCase() === req.name.toLowerCase()) {
+            throw new Error(`已有同名 runner：${req.name}，请更换名称`);
+          }
+          const work = rt.meta?.workFolder;
+          for (const existing of [rt.dir, ...(work ? [isAbsolutePath(work) ? work : join(rt.dir, work)] : [])]) {
+            const canonical = await canonicalRegistrationPath(existing);
+            if (paths.filter((path) => path.owner === req.name).some((path) => pathsOverlap(path.path, canonical))) {
+              throw new Error(`目录与 ${rt.meta?.agentName ?? rt.id} 使用的目录重叠，请选择独立目录`);
+            }
+          }
+        }
+        await validateNewRunner(req, this.#config?.searchDirs ?? []);
+      }
+      this.#registrationBatch.items = requests.map((req) => ({ name: req.name, dir: req.dir, status: "pending", message: "等待注册" }));
+      if (input.method === "github") {
+        this.#authorization = { status: "requesting", message: "正在申请设备验证码…" };
+        this.#emit();
+        tokens = await authorizeRunners({
+          clientId: input.clientId.trim() || githubClientId(),
+          targetUrl: target.url,
+          count: requests.length,
+          signal: controller.signal,
+          onCode: (code) => {
+            this.#authorization = { status: "waiting", ...code, message: "请在手机或浏览器上确认授权" };
+            this.#emit();
+          },
+          onAuthorized: () => {
+            this.#authorization = { status: "exchanging", message: "授权成功，正在申请本批 runner 注册 Token…" };
+            this.#emit();
+          },
+        });
+        controller.signal.throwIfAborted();
+        this.#authorization = { status: "registering", message: "账号访问凭据已从本次会话释放，正在注册 runner" };
+      } else {
+        if (!input.token.trim()) throw new Error("请填写 runner 注册 Token，而不是 PAT 或账号访问 Token");
+        tokens = requests.map(() => input.token.trim());
+      }
+      input.token = "";
+      this.#emit();
+      for (const [index, req] of requests.entries()) {
+        const item = this.#registrationBatch.items[index]!;
+        item.status = "registering";
+        item.message = "解包并配置…";
+        req.token = tokens[index]!;
+        tokens[index] = "";
+        this.#emit();
+        try {
+          const result = await registerRunner(req, this.#config?.searchDirs ?? [], (message) => {
+            item.message = message;
+            this.#task.message = `${index + 1}/${requests.length} · ${req.name}：${message}`;
+            this.#emitSoon();
+          });
+          if (!result.ok) throw new Error(result.error ?? "注册失败");
+          const rt = this.#ensureRt(result.runnerDir, true);
+          rt.meta = await readRunnerMeta(result.runnerDir);
+          if (this.#config && this.#persist) {
+            this.#config = upsertInstance(this.#config, { id: rt.id, dir: rt.dir, autoStart: false });
+            await saveConfig(this.#config);
+          }
+          await this.start(rt.id);
+          item.status = "ok";
+          item.message = rt.lastError ? `已注册；启动失败，请从实例卡片重试：${rt.lastError}` : "已注册并启动";
+        } catch (error) {
+          item.status = "error";
+          item.message = error instanceof Error ? error.message : "注册失败，请检查目录和网络后重试";
+        } finally {
+          req.token = "";
+          this.#emit();
+        }
+      }
+      const failed = this.#registrationBatch.items.filter((item) => item.status === "error").length;
+      this.#task = { kind: "register", status: failed ? "error" : "ok", message: `${requests.length - failed}/${requests.length} 个 runner 注册成功${failed ? `，${failed} 个失败；成功项不受影响` : ""}` };
+      if (this.#authorization) this.#authorization = { status: "cleared", message: "本机临时凭据已清理；GitHub 上的应用授权仍保留" };
+    } catch (error) {
+      const message = controller.signal.aborted ? "授权已取消，本机临时凭据已清理" : error instanceof Error ? error.message : "注册失败，请稍后重试";
+      this.#authorization = { status: controller.signal.aborted ? "cancelled" : "error", message };
+      this.#task = { kind: "register", status: "error", message };
+      for (const item of this.#registrationBatch.items) {
+        if (item.status === "pending") {
+          item.status = "error";
+          item.message = controller.signal.aborted ? "已取消，未创建" : "未创建，请修正授权或配置后重试";
+        }
+      }
+    } finally {
+      input.token = "";
+      tokens.fill("");
+      this.#registrationBatch.credentialsCleared = true;
+      this.#authController = null;
+      this.#emit();
+    }
+  }
+
   async destroy(): Promise<void> {
+    this.#authController?.abort();
     if (this.#tickTimer) clearInterval(this.#tickTimer);
     this.#tickTimer = null;
     for (const rt of this.#rts.values()) rt.tail?.stop();

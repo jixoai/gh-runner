@@ -29,4 +29,6 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+        env:
+          GH_RUNNER_GITHUB_CLIENT_ID: ${{ vars.GH_RUNNER_GITHUB_CLIENT_ID }}
       - run: npm publish --provenance --access public
