@@ -17,7 +17,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { CreateTrayHandle } from "opentray";
+import { TransportTimeoutError, type CreateTrayHandle } from "opentray";
 import { WebviewExt, type WebviewWindowHandle, type WebviewWindowOptions } from "@opentray/ext-webview";
 import type { Fleet } from "./fleet.ts";
 import type { InstanceView, Snapshot, UiCommand, UiPush } from "./types.ts";
@@ -25,6 +25,24 @@ import { APP_VERSION } from "./version.ts";
 
 const DRAIN_INTERVAL_MS = 150;
 const PUSH_DEBOUNCE_MS = 120;
+const WINDOW_BOOTSTRAP_DEADLINE_MS = 30_000;
+
+const resilientWebviewExt: typeof WebviewExt = {
+  ...WebviewExt,
+  extend(tray, context, options) {
+    return WebviewExt.extend(tray, {
+      ...context,
+      request(data, callOptions) {
+        const deadlineMs = callOptions?.deadlineMs;
+        const isBootstrapShow = typeof data === "object" && data !== null &&
+          "type" in data && data.type === "show" && deadlineMs !== undefined;
+        return context.request(data, isBootstrapShow
+          ? { ...callOptions, deadlineMs: Math.max(deadlineMs, WINDOW_BOOTSTRAP_DEADLINE_MS) }
+          : callOptions);
+      },
+    }, options);
+  },
+};
 
 /** U+2028/2029 会切断 JS 对象字面量，序列化后必须转义（不可见字符法则）。 */
 function jsLiteral(value: string): string {
@@ -33,6 +51,7 @@ function jsLiteral(value: string): string {
 
 export class UiHost {
   #window: WebviewWindowHandle | null = null;
+  #opening: Promise<void> | null = null;
   #lastSnapshot: Snapshot | null = null;
   #ackedSeq = 0;
   #drainTimer: NodeJS.Timeout | null = null;
@@ -59,12 +78,21 @@ export class UiHost {
     private readonly openExternal: (url: string) => Promise<void>,
   ) {}
 
-  async open(): Promise<void> {
+  open(): Promise<void> {
+    if (this.#opening) return this.#opening;
+    this.#opening = this.#open().finally(() => {
+      this.#opening = null;
+    });
+    return this.#opening;
+  }
+
+  async #open(): Promise<void> {
     if (this.#window) {
       try {
         await this.#window.show();
         await this.#window.focus();
-      } catch {
+      } catch (error) {
+        if (error instanceof TransportTimeoutError) throw error;
         // Windows 上 X 关闭可能销毁而非隐藏窗口——句柄已死则走重建路径。
         this.#window = null;
       }
@@ -92,9 +120,9 @@ export class UiHost {
         background: { kind: "semantic", token: "blur", state: "active" },
       },
     });
-    this.#window = win;
     await win.show();
     await win.setMinimumSize(720, 520);
+    this.#window = win;
     // 可见性门控（fail-closed）：对隐藏窗口的 evaluate 会把它重新激活并抢焦点
     //（2026-10-27 bisect 实证，evaluate 是唯一有此副作用的宿主原语）。Windows 上
     // X 关闭可能不发 visibleChange，所以事件只作快路径提示；推送前另有 isVisible 实证。
@@ -398,7 +426,7 @@ export class UiHost {
 
 /** 从托盘句柄构造 Webview 能力的便利封装（保持 main.ts 干净）。 */
 export function extendWebview(tray: CreateTrayHandle): WebviewTray {
-  return tray.extend(WebviewExt) as WebviewTray;
+  return tray.extend(resilientWebviewExt) as WebviewTray;
 }
 
 /** extend(WebviewExt) 后可用的窗口能力面（本应用只用 createWebviewWindow）。 */

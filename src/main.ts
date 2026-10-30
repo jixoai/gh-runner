@@ -217,10 +217,16 @@ async function main(): Promise<void> {
     { appId: APP_ID, appName: "GH Runner", appIcon: appIcon(), packageRoot } as OpenTrayRuntimeOptions,
   );
 
+  const openWindow = (): void => {
+    void uiHost.open().catch((err) => {
+      console.error("[gh-runner] 打开控制面板失败，可再次点击托盘重试:", err);
+      fleet.reportPickerFailure("打开控制面板", err, "可再次点击托盘重试；runner 不受影响");
+    });
+  };
   const projection = new TrayProjection(tray, {
-    openWindow: () => void uiHost.open(),
+    openWindow,
     openInstance: (id) => {
-      void uiHost.open();
+      openWindow();
       // 面板侧通过最近推送即可看到全部实例；这里额外把选中实例放到日志视图。
       void Promise.resolve(id);
     },
@@ -253,7 +259,7 @@ async function main(): Promise<void> {
   );
 
   fleet.onSnapshot((snap) => {
-    void projection.update(snap);
+    void projection.update(snap).catch((err) => console.error("[gh-runner] 更新托盘失败:", err));
     uiHost.push(snap);
   });
   tray.onMenuClick(({ itemId }) => {
@@ -261,7 +267,7 @@ async function main(): Promise<void> {
   });
 
   if (mode === "--smoke") {
-    void runSmoke(fleet, uiHost);
+    await runSmoke(fleet, uiHost);
     return;
   }
 

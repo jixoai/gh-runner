@@ -94,6 +94,9 @@ pnpm dev                        # 无头：只读打印真实实例状态快照
 pnpm smoke                      # 起真实托盘+窗口，验证 host→page→host 闭环 → /tmp/gh-runner-smoke.json
 ```
 
+原生控制面板首次打开允许最多 30 秒冷启动；期间重复点击共用一次初始化。
+如果打开失败，进程不会因此退出，可再次点击菜单栏图标重试，已有 runner 不受影响。
+
 架构与实测教训（WKWebView evaluate 体积上限、.runner BOM、spawn 失败三律、lsof realpath 等）
 见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
