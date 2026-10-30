@@ -52,6 +52,8 @@ function jsLiteral(value: string): string {
 export class UiHost {
   #window: WebviewWindowHandle | null = null;
   #opening: Promise<void> | null = null;
+  #destroyed = false;
+  #destroying: Promise<void> | null = null;
   #lastSnapshot: Snapshot | null = null;
   #ackedSeq = 0;
   #drainTimer: NodeJS.Timeout | null = null;
@@ -79,6 +81,7 @@ export class UiHost {
   ) {}
 
   open(): Promise<void> {
+    if (this.#destroyed) return Promise.resolve();
     if (this.#opening) return this.#opening;
     this.#opening = this.#open().finally(() => {
       this.#opening = null;
@@ -90,6 +93,7 @@ export class UiHost {
     if (this.#window) {
       try {
         await this.#window.show();
+        if (this.#destroyed) return;
         await this.#window.focus();
       } catch (error) {
         if (error instanceof TransportTimeoutError) throw error;
@@ -105,6 +109,7 @@ export class UiHost {
     }
     const htmlPath = join(dirname(fileURLToPath(import.meta.url)), "ui", "index.html");
     const html = await readFile(htmlPath, "utf8");
+    if (this.#destroyed) return;
     const win = this.webviewTray.createWebviewWindow({
       html,
       width: 1020,
@@ -121,12 +126,21 @@ export class UiHost {
       },
     });
     await win.show();
+    if (this.#destroyed) {
+      await win.destroy();
+      return;
+    }
     await win.setMinimumSize(720, 520);
+    if (this.#destroyed) {
+      await win.destroy();
+      return;
+    }
     this.#window = win;
     // 可见性门控（fail-closed）：对隐藏窗口的 evaluate 会把它重新激活并抢焦点
     //（2026-10-27 bisect 实证，evaluate 是唯一有此副作用的宿主原语）。Windows 上
     // X 关闭可能不发 visibleChange，所以事件只作快路径提示；推送前另有 isVisible 实证。
     win.listen("visibleChange", (event) => {
+      if (this.#destroyed) return;
       const visible = (event.payload as { visible?: boolean }).visible;
       this.#visible = typeof visible === "boolean" ? visible : true;
       if (visible) {
@@ -145,6 +159,7 @@ export class UiHost {
   }
 
   push(snapshot: Snapshot): void {
+    if (this.#destroyed) return;
     this.#lastSnapshot = snapshot;
     this.#flush();
   }
@@ -172,14 +187,25 @@ export class UiHost {
     }
   }
 
-  async destroy(): Promise<void> {
+  destroy(): Promise<void> {
+    if (this.#destroying) return this.#destroying;
+    this.#destroyed = true;
+    this.#visible = false;
     if (this.#drainTimer) clearInterval(this.#drainTimer);
     if (this.#pushTimer) clearTimeout(this.#pushTimer);
     this.#drainTimer = null;
     this.#pushTimer = null;
+    this.#destroying = (async () => {
+      await this.#opening?.catch(() => {});
+      const win = this.#window;
+      this.#window = null;
+      if (win && !win.connectionDead) await win.destroy();
+    })();
+    return this.#destroying;
   }
 
   #flush(): void {
+    if (this.#destroyed) return;
     if (this.#pushTimer || !this.#window) return;
     this.#pushTimer = setTimeout(() => {
       this.#pushTimer = null;
@@ -189,6 +215,7 @@ export class UiHost {
   }
 
   async #doPush(): Promise<void> {
+    if (this.#destroyed) return;
     const win = this.#window;
     const snap = this.#lastSnapshot;
     if (!win || !snap || win.connectionDead) return;
@@ -201,7 +228,7 @@ export class UiHost {
         this.#visible = false;
       }
     }
-    if (!this.#visible) return;
+    if (this.#destroyed || !this.#visible) return;
     if (this.#pushInFlight) {
       this.#pushPending = true;
       return;
@@ -286,6 +313,7 @@ export class UiHost {
   }
 
   async #evaluate(json: string): Promise<boolean> {
+    if (this.#destroyed) return false;
     const win = this.#window;
     if (!win || win.connectionDead) return false;
     try {
@@ -300,6 +328,7 @@ export class UiHost {
   }
 
   async #drain(): Promise<void> {
+    if (this.#destroyed) return;
     const win = this.#window;
     if (!win || win.connectionDead) return;
     // 隐藏期全静默（drain 本身无辜，但页面不可见时不可能有命令）；仅 1s 一次实证
@@ -324,6 +353,7 @@ export class UiHost {
       return;
     }
     for (const message of messages) {
+      if (this.#destroyed) return;
       if (process.env.RF_DEBUG) {
         console.error("[ui] ipc <-", (message.payload as { type?: string } | null)?.type);
       }
@@ -334,6 +364,7 @@ export class UiHost {
   }
 
   async #handle(cmd: UiCommand): Promise<void> {
+    if (this.#destroyed) return;
     switch (cmd.type) {
       case "hello": {
         // 全量重推：offset 清零后走统一 flush 路径（与在途推送单飞串行，杜绝交错重复）。

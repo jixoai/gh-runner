@@ -12,6 +12,7 @@ function makeHost() {
     focus: vi.fn(async () => {}),
     setMinimumSize: vi.fn(async () => {}),
     listen: vi.fn(),
+    destroy: vi.fn(async () => {}),
   };
   const createWebviewWindow = vi.fn(() => win);
   const ui = new UiHost(
@@ -28,6 +29,42 @@ function makeHost() {
 afterEach(() => vi.restoreAllMocks());
 
 describe("窗口启动恢复", () => {
+  it("退出销毁原生窗口且幂等，退出后不能重新打开", async () => {
+    const { ui, win, createWebviewWindow } = makeHost();
+    await ui.open();
+    const first = ui.destroy();
+    expect(ui.destroy()).toBe(first);
+    await first;
+    await ui.open();
+    expect(win.destroy).toHaveBeenCalledOnce();
+    expect(win.show).toHaveBeenCalledOnce();
+    expect(createWebviewWindow).toHaveBeenCalledOnce();
+  });
+
+  it("退出撞上首次 show 时销毁迟到的窗口，不再初始化和监听事件", async () => {
+    const { ui, win, createWebviewWindow } = makeHost();
+    let finishShow!: () => void;
+    win.show.mockImplementationOnce(() => new Promise<void>((resolve) => { finishShow = resolve; }));
+    const opening = ui.open();
+    await vi.waitFor(() => expect(win.show).toHaveBeenCalledOnce());
+    const destroying = ui.destroy();
+    await ui.open();
+    finishShow();
+    await Promise.all([opening, destroying]);
+    expect(win.destroy).toHaveBeenCalledOnce();
+    expect(win.setMinimumSize).not.toHaveBeenCalled();
+    expect(win.listen).not.toHaveBeenCalled();
+    expect(createWebviewWindow).toHaveBeenCalledOnce();
+  });
+
+  it("退出撞上 HTML 读取时不再创建原生窗口", async () => {
+    const { ui, createWebviewWindow } = makeHost();
+    const opening = ui.open();
+    await ui.destroy();
+    await opening;
+    expect(createWebviewWindow).not.toHaveBeenCalled();
+  });
+
   it("连续点击在首次 show 完成前共用一次初始化", async () => {
     const { ui, win, createWebviewWindow } = makeHost();
     let finishShow!: () => void;

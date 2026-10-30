@@ -20,6 +20,7 @@ import { TrayProjection } from "./tray.ts";
 import { UiHost, extendWebview } from "./window.ts";
 import { appIcon } from "./branding.ts";
 import { APP_VERSION } from "./version.ts";
+import { AppLifecycle } from "./lifecycle.ts";
 
 const APP_ID = "com.jixoai.gh-runner";
 
@@ -57,7 +58,7 @@ let reportPickerFailure: (what: string, err: unknown, hint?: string) => void = (
 async function runProbe(): Promise<void> {
   const tray = await createTray(
     { id: APP_ID, icon: { "text-only": "probe" } },
-    { appId: APP_ID, appName: "GH Runner Probe" },
+    { appId: APP_ID, appName: "GH Runner Probe", recovery: { enabled: false } },
   );
   const webviewTray = extendWebview(tray);
   const win = webviewTray.createWebviewWindow({
@@ -121,7 +122,7 @@ async function runProbe(): Promise<void> {
   await finish();
 }
 
-async function runSmoke(fleet: Fleet, uiHost: UiHost): Promise<void> {
+async function runSmoke(uiHost: UiHost, shutdown: () => Promise<void>): Promise<void> {
   await uiHost.open();
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline && uiHost.ackedSeq === 0) {
@@ -163,8 +164,7 @@ async function runSmoke(fleet: Fleet, uiHost: UiHost): Promise<void> {
   // RF_SMOKE_HOLD=<ms>：结果落盘后挂住窗口（供真实窗口截图验收）。
   const holdMs = Number(process.env.RF_SMOKE_HOLD ?? "0");
   if (holdMs > 0) await new Promise((r) => setTimeout(r, holdMs));
-  await fleet.destroy();
-  process.exit(0);
+  await shutdown();
 }
 
 async function main(): Promise<void> {
@@ -214,24 +214,9 @@ async function main(): Promise<void> {
       icon: { "text-only": "▶…" },
       menu: { items: [{ type: "item", id: 1, title: "打开控制面板", primaryEvent: true }] },
     },
-    { appId: APP_ID, appName: "GH Runner", appIcon: appIcon(), packageRoot } as OpenTrayRuntimeOptions,
+    { appId: APP_ID, appName: "GH Runner", appIcon: appIcon(), packageRoot, recovery: { enabled: false } } as OpenTrayRuntimeOptions,
   );
 
-  const openWindow = (): void => {
-    void uiHost.open().catch((err) => {
-      console.error("[gh-runner] 打开控制面板失败，可再次点击托盘重试:", err);
-      fleet.reportPickerFailure("打开控制面板", err, "可再次点击托盘重试；runner 不受影响");
-    });
-  };
-  const projection = new TrayProjection(tray, {
-    openWindow,
-    openInstance: (id) => {
-      openWindow();
-      // 面板侧通过最近推送即可看到全部实例；这里额外把选中实例放到日志视图。
-      void Promise.resolve(id);
-    },
-    quit: () => void shutdown(),
-  });
   const webviewTray = extendWebview(tray);
   const opener = attachOpener(tray);
   const uiHost = new UiHost(
@@ -258,27 +243,51 @@ async function main(): Promise<void> {
     (url) => opener.open(url),
   );
 
-  fleet.onSnapshot((snap) => {
+  let stopSnapshots = () => {};
+  let stopMenu = () => {};
+  let stopConnectionDead = () => {};
+  const lifecycle = new AppLifecycle(
+    [
+      () => { stopSnapshots(); stopMenu(); stopConnectionDead(); },
+      () => fleet.destroy(),
+      () => uiHost.destroy(),
+      () => tray.destroy(),
+    ],
+    (code) => process.exit(code),
+    (err) => console.error("[gh-runner] 退出清理失败:", err),
+  );
+  const shutdown = () => lifecycle.shutdown();
+  const openWindow = (): void => {
+    if (lifecycle.stopping) return;
+    void uiHost.open().catch((err) => {
+      if (lifecycle.stopping) return;
+      console.error("[gh-runner] 打开控制面板失败，可再次点击托盘重试:", err);
+      fleet.reportPickerFailure("打开控制面板", err, "可再次点击托盘重试；runner 不受影响");
+    });
+  };
+  const projection = new TrayProjection(tray, {
+    openWindow,
+    openInstance: () => openWindow(),
+    quit: () => void shutdown(),
+  });
+  stopSnapshots = fleet.onSnapshot((snap) => {
+    if (lifecycle.stopping) return;
     void projection.update(snap).catch((err) => console.error("[gh-runner] 更新托盘失败:", err));
     uiHost.push(snap);
   });
-  tray.onMenuClick(({ itemId }) => {
+  stopMenu = tray.onMenuClick(({ itemId }) => {
+    if (lifecycle.stopping) return;
     if (!projection.handleMenuClick(itemId)) console.warn(`[tray] 未路由的菜单项 ${itemId}`);
   });
+  stopConnectionDead = tray.onConnectionDead?.(() => void shutdown()) ?? (() => {});
 
-  if (mode === "--smoke") {
-    await runSmoke(fleet, uiHost);
-    return;
-  }
-
-  const shutdown = async (): Promise<void> => {
-    await uiHost.destroy();
-    await tray.destroy();
-    await fleet.destroy();
-    process.exit(0);
-  };
   process.on("SIGINT", () => void shutdown());
   process.on("SIGTERM", () => void shutdown());
+
+  if (mode === "--smoke") {
+    await runSmoke(uiHost, shutdown);
+    return;
+  }
   console.log(`[gh-runner] v${APP_VERSION} 已启动（配置目录 ${configDir()}）`);
 }
 

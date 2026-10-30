@@ -25,6 +25,7 @@ function fakeWindow() {
     focus: vi.fn(async () => {}),
     setMinimumSize: vi.fn(async () => {}),
     close: vi.fn(async () => {}),
+    destroy: vi.fn(async () => {}),
     isVisible: vi.fn(async () => state.visible),
     evaluate: vi.fn(async (js: string) => {
       if (!state.visible) throw new Error("evaluate on hidden window must never happen");

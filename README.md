@@ -96,6 +96,9 @@ pnpm smoke                      # 起真实托盘+窗口，验证 host→page→
 
 原生控制面板首次打开允许最多 30 秒冷启动；期间重复点击共用一次初始化。
 如果打开失败，进程不会因此退出，可再次点击菜单栏图标重试，已有 runner 不受影响。
+通过托盘菜单或 macOS Dock 选择「退出」会关闭原生窗口和宿主进程，不会自动重新拉起。
+当前关闭底层原生进程自动恢复，避免把系统退出误判为崩溃；原生进程异常结束时也会退出管理器，
+需要手动重新启动。已启动的 runner 仍在后台独立运行。
 
 架构与实测教训（WKWebView evaluate 体积上限、.runner BOM、spawn 失败三律、lsof realpath 等）
 见 [ARCHITECTURE.md](ARCHITECTURE.md)。
