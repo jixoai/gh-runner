@@ -22,6 +22,7 @@ interface AuthorizationOptions {
   onCode: (code: DeviceCode) => void;
   onAuthorized: () => void;
   count: number;
+  purpose?: "register" | "remove";
 }
 
 type Json = Record<string, unknown>;
@@ -41,6 +42,7 @@ export async function authorizeRunners(
   const { clientId, signal, onCode, onAuthorized } = options;
   const target = parseRunnerTarget(options.targetUrl);
   if (!Number.isInteger(options.count) || options.count < 1 || options.count > 10) throw new Error("每批可创建 1–10 个 runner");
+  const removing = options.purpose === "remove";
   if (!clientId.trim()) throw new Error("尚未配置 GitHub App Client ID，请联系应用维护者或使用手动 Token");
   const post = (path: string, values: Record<string, string>, activeSignal = signal) => request(`https://github.com${path}`, {
     method: "POST",
@@ -95,7 +97,8 @@ export async function authorizeRunners(
     signal.throwIfAborted();
     onAuthorized();
     for (let index = 0; index < options.count; index += 1) {
-      const response = await request(`https://api.github.com${target.apiPath}`, {
+      const apiPath = removing ? target.apiPath.replace(/registration-token$/, "remove-token") : target.apiPath;
+      const response = await request(`https://api.github.com${apiPath}`, {
         method: "POST",
         headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${accessToken}` },
         signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
@@ -108,10 +111,10 @@ export async function authorizeRunners(
             ? "无法管理该组织的 runner：请确认你是组织管理员，GitHub App 已安装到该组织并获授 Self-hosted runners: write；如有 SSO，请先完成组织授权"
             : "无法管理该仓库的 runner：请确认你有仓库管理权限，GitHub App 已获授该仓库的 Administration: write；如有 SSO，请先完成组织授权");
         }
-        throw new Error(`申请 runner 注册 Token 失败（HTTP ${response.status}），请稍后重试`);
+        throw new Error(`申请 runner ${removing ? "注销" : "注册"} Token 失败（HTTP ${response.status}），请稍后重试`);
       }
       if (typeof registration.token !== "string" || !registration.token) {
-        throw new Error("GitHub 未返回 runner 注册 Token，请重试");
+        throw new Error(`GitHub 未返回 runner ${removing ? "注销" : "注册"} Token，请重试`);
       }
       tokens.push(registration.token);
       registration.token = "";

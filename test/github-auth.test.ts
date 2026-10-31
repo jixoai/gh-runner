@@ -31,6 +31,15 @@ describe("内置 GitHub App Client ID", () => {
 });
 
 describe("GitHub Device Flow", () => {
+  it.each(["https://github.com/acme", "https://github.com/alice/project"])("注销使用独立 remove-token 接口：%s", async (targetUrl) => {
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(codeResponse()).mockResolvedValueOnce(json({ access_token: "PRIVATE_ACCESS", refresh_token: "PRIVATE_REFRESH" })).mockResolvedValueOnce(json({ token: "REMOVE_SECRET" }, 201));
+    const input = { ...options(), purpose: "remove" as const, targetUrl };
+    expect(await authorizeRunners(input, request)).toEqual(["REMOVE_SECRET"]);
+    const expectedPath = targetUrl.endsWith("project") ? "/repos/alice/project/actions/runners/remove-token" : "/orgs/acme/actions/runners/remove-token";
+    expect(request.mock.calls[2]![0]).toBe(`https://api.github.com${expectedPath}`);
+    expect(JSON.stringify(input.onCode.mock.calls)).not.toContain("SECRET");
+  });
+
   it("一次授权为本批申请独立注册 Token，不向回调暴露账号或设备凭据", async () => {
     const request = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(codeResponse())

@@ -45,6 +45,7 @@ export interface InstanceView {
   orgUrl: string | null;
   workFolder: string | null;
   configured: boolean;
+  unregistered?: boolean;
   processState: ProcessState;
   external: boolean;
   autoStart: boolean;
@@ -59,7 +60,7 @@ export interface InstanceView {
 }
 
 export interface FleetTask {
-  kind: "register" | "none";
+  kind: "register" | "unregister" | "reregister" | "none";
   status: "running" | "ok" | "error";
   message: string | null;
 }
@@ -112,6 +113,22 @@ export interface BatchRegistrationRequest {
   runners: { dir: string; name: string; labels: string; workFolder: string }[];
 }
 
+export interface RunnerOperationRequest {
+  requestId: string;
+  id: string;
+  action: "unregister" | "reregister";
+  method: "github" | "token";
+  token: string;
+}
+
+export interface RunnerOperationState {
+  requestId: string;
+  id: string;
+  action: "unregister" | "reregister";
+  status: "running" | "ok" | "error";
+  message: string;
+}
+
 export interface RegistrationBatchState {
   requestId?: string;
   credentialsCleared: boolean;
@@ -138,6 +155,7 @@ export interface Snapshot {
   authorization?: AuthorizationState | null;
   registrationDefaults?: RegistrationDefaults;
   registrationBatch?: RegistrationBatchState | null;
+  runnerOperation?: RunnerOperationState | null;
 }
 
 /** 宿主 → 页面 推送（经 evaluate 注入 window.__rfSink）。summary 与 log 增量分通道，
@@ -156,6 +174,7 @@ export type UiPush =
       authorization?: AuthorizationState | null;
       registrationDefaults?: RegistrationDefaults;
       registrationBatch?: RegistrationBatchState | null;
+      runnerOperation?: RunnerOperationState | null;
     }
   | { kind: "log"; seq: number; id: string; from: number; truncated: boolean; lines: string[] };
 
@@ -167,6 +186,8 @@ export type UiCommand =
   | { type: "stop"; id: string }
   | { type: "set-auto-start"; id: string; value: boolean }
   | { type: "open-diag"; id: string }
+  | { type: "open-work-dir"; id: string }
+  | ({ type: "runner-operation" } & RunnerOperationRequest)
   | { type: "open-url"; url: string }
   | { type: "download-latest" }
   | { type: "import-package" }
@@ -198,4 +219,5 @@ export interface InstanceConfig {
   id: string;
   dir: string;
   autoStart: boolean;
+  unregistered?: { name: string; targetUrl: string; workFolder: string };
 }

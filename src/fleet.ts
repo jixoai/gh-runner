@@ -13,6 +13,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { homedir, hostname } from "node:os";
 import { existsSync } from "node:fs";
 import { realpath } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { DirTail } from "./tailer.ts";
 import { normalizeLine, parseConsoleLine, stripDiagPrefix } from "./logparse.ts";
 import {
@@ -30,7 +31,7 @@ import {
   type SpawnedRunner,
 } from "./supervisor.ts";
 import { loadConfig, saveConfig, upsertInstance } from "./config.ts";
-import { registerRunner, validateNewRunner, type RegisterRequest } from "./register.ts";
+import { registerRunner, unregisterRunner, validateNewRunner, type RegisterRequest } from "./register.ts";
 import { authorizeRunners, githubClientId } from "./github-auth.ts";
 import { parseRunnerTarget } from "./github-target.ts";
 import {
@@ -39,7 +40,7 @@ import {
   downloadPackage,
   type DownloadState,
 } from "./packages.ts";
-import { ARCH, PLATFORM, isAbsolutePath } from "./platform.ts";
+import { ARCH, PLATFORM, isAbsolutePath, registerSpawn } from "./platform.ts";
 import type {
   CurrentJob,
   FleetTask,
@@ -50,6 +51,8 @@ import type {
   AuthorizationState,
   BatchRegistrationRequest,
   RegistrationBatchState,
+  RunnerOperationRequest,
+  RunnerOperationState,
 } from "./types.ts";
 
 const LOG_RING_MAX = 400;
@@ -115,6 +118,8 @@ export class Fleet {
   #authorization: AuthorizationState | null = null;
   #registrationBatch: RegistrationBatchState | null = null;
   #authController: AbortController | null = null;
+  #runnerOperation: RunnerOperationState | null = null;
+  #operationId: string | null = null;
 
   async boot(options: BootOptions = {}): Promise<void> {
     this.#persist = options.persist ?? true;
@@ -167,6 +172,7 @@ export class Fleet {
       download: this.#download,
       authorization: this.#authorization ? { ...this.#authorization } : null,
       registrationBatch: this.#registrationBatch ? structuredClone(this.#registrationBatch) : null,
+      runnerOperation: this.#runnerOperation ? { ...this.#runnerOperation } : null,
       registrationDefaults: {
         parentDir: join(homedir(), "actions-runners"),
         name: hostname().replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 40) || "runner",
@@ -253,6 +259,7 @@ export class Fleet {
   }
 
   async start(id: string): Promise<void> {
+    if (this.#operationId === id) return;
     const rt = this.#rts.get(id);
     if (!rt) return;
     if (rt.processState === "running" || rt.processState === "starting") return;
@@ -349,10 +356,12 @@ export class Fleet {
   }
 
   async setAutoStart(id: string, value: boolean): Promise<void> {
+    if (this.#operationId === id) return;
     const rt = this.#rts.get(id);
     if (!rt || !this.#config) return;
     rt.autoStart = value;
     this.#config = upsertInstance(this.#config, {
+      ...this.#config.instances.find((item) => item.id === id),
       id: rt.id,
       dir: rt.dir,
       autoStart: value,
@@ -362,7 +371,7 @@ export class Fleet {
   }
 
   async register(req: RegisterRequest): Promise<void> {
-    if (this.#task.kind === "register" && this.#task.status === "running") return;
+    if (this.#task.status === "running" || this.#operationId !== null) { req.token = ""; return; }
     this.#registrationBatch = null;
     this.#authorization = null;
     this.#task = { kind: "register", status: "running", message: null };
@@ -399,7 +408,7 @@ export class Fleet {
   }
 
   async registerBatch(input: BatchRegistrationRequest): Promise<void> {
-    if (this.#task.kind === "register" && this.#task.status === "running") {
+    if (this.#task.status === "running" || this.#operationId !== null) {
       input.token = "";
       return;
     }
@@ -531,6 +540,130 @@ export class Fleet {
     }
   }
 
+  async operateRunner(input: RunnerOperationRequest): Promise<void> {
+    if (this.#task.status === "running" || this.#operationId !== null) { input.token = ""; return; }
+    const removing = input.action === "unregister";
+    const title = removing ? "注销" : "重新注册";
+    const controller = new AbortController();
+    this.#authController = controller;
+    this.#operationId = input.id;
+    this.#authorization = null;
+    this.#runnerOperation = { requestId: input.requestId, id: input.id, action: input.action, status: "running", message: "检查实例…" };
+    this.#task = { kind: input.action, status: "running", message: `正在${title}…` };
+    let token = "";
+    let registration: RegisterRequest | null = null;
+    let removed = false;
+    this.#emit();
+    const progress = (message: string) => {
+      this.#runnerOperation!.message = message;
+      this.#task.message = message;
+      this.#emitSoon();
+    };
+    try {
+      while (this.#ticking) await delay(25, undefined, { signal: controller.signal });
+      if (input.action !== "unregister" && input.action !== "reregister") throw new Error("不支持的 runner 操作");
+      if (input.method !== "github" && input.method !== "token") throw new Error("请选择授权方式");
+      if (!this.#persist || !this.#config) throw new Error("只读模式不能注销或重新注册");
+      const rt = this.#rts.get(input.id);
+      if (!rt?.meta) throw new Error("实例不存在，请刷新后重试");
+      if (rt.currentJob) throw new Error("实例正在执行作业，请等待完成后再操作");
+      if (rt.external) throw new Error("请先停止外部终端或系统服务中的 runner，再操作");
+      if (rt.processState === "starting" || rt.processState === "stopping") throw new Error("实例正在切换状态，请稍后重试");
+      const saved = this.#config.instances.find((item) => item.id === rt.id)?.unregistered;
+      if (removing && !rt.meta.configured) throw new Error("实例未注册，无需注销");
+      if (!removing && (rt.meta.configured || !saved)) throw new Error("仅支持重新注册本工具保留的已注销实例");
+      const entry = registerSpawn(rt.dir);
+      const entryPath = isAbsolutePath(entry.file) ? entry.file : resolve(rt.dir, entry.file);
+      if (!existsSync(entryPath)) throw new Error("安装文件已缺失，请重新下载分发包并添加实例；工作文件可继续保留");
+      const target = parseRunnerTarget(rt.meta.gitHubUrl ?? "");
+      const originalDir = await realpath(rt.dir);
+      const originalAgentId = rt.meta.agentId;
+      const workFolder = rt.meta.workFolder ? resolve(rt.dir, rt.meta.workFolder) : "";
+      if (!workFolder) throw new Error("实例缺少工作目录配置，请先检查 .runner");
+      const retained = { name: rt.meta.agentName ?? rt.id, targetUrl: target.url, workFolder };
+      if (input.method === "github") {
+        this.#authorization = { status: "requesting", message: "正在申请设备验证码…" };
+        this.#emit();
+        const tokens = await authorizeRunners({
+          clientId: githubClientId(), targetUrl: target.url, count: 1,
+          purpose: removing ? "remove" : "register", signal: controller.signal,
+          onCode: (code) => {
+            this.#authorization = { status: "waiting", ...code, message: `请确认${title}授权` };
+            this.#emit();
+          },
+          onAuthorized: () => {
+            this.#authorization = { status: "exchanging", message: `正在申请${title} Token…` };
+            this.#emit();
+          },
+        });
+        token = tokens[0] ?? "";
+        tokens.fill("");
+      } else {
+        token = input.token.trim();
+      }
+      input.token = "";
+      if (!token) throw new Error(`缺少 runner ${removing ? "注销" : "注册"} Token（不是 PAT）`);
+      controller.signal.throwIfAborted();
+      if (rt.currentJob) throw new Error("授权期间实例开始执行作业，请等待完成后重试");
+      if (rt.external || await realpath(rt.dir) !== originalDir) throw new Error("授权期间实例状态或目录发生变化，请重新检查后重试");
+      const currentMeta = await readRunnerMeta(rt.dir);
+      if (removing && (!currentMeta.configured || currentMeta.agentId !== originalAgentId || currentMeta.gitHubUrl !== rt.meta.gitHubUrl)) {
+        throw new Error("授权期间 runner 注册配置发生变化，请刷新后重试");
+      }
+      if (!removing && currentMeta.configured) throw new Error("目录已被其他进程注册，请刷新后重试");
+      this.#authorization = { status: "registering", message: `临时账号凭据已释放，正在${title}` };
+      this.#emit();
+      if (removing) {
+        progress("正在停止 runner…");
+        await this.stop(rt.id);
+        const deadline = Date.now() + 12_000;
+        while (rt.pid !== null && Date.now() < deadline) await delay(100);
+        const processes = await findListenerProcesses();
+        const runnerDir = await realpath(rt.dir);
+        const normalize = (path: string) => PLATFORM === "win32" ? path.replace(/\\/g, "/").toLowerCase() : path;
+        if (rt.pid !== null || [...processes.values()].some((path) => normalize(path) === normalize(runnerDir))) {
+          throw new Error("runner 尚未完全停止，请先停止系统服务或外部进程后重试");
+        }
+        await unregisterRunner(rt.dir, token, progress);
+        removed = true;
+        rt.meta = { ...rt.meta, configured: false, agentId: null };
+        rt.processState = "stopped";
+        rt.pid = null;
+        rt.child = null;
+        rt.autoStart = false;
+        rt.lastError = null;
+        this.#config = upsertInstance(this.#config, { id: rt.id, dir: rt.dir, autoStart: false, unregistered: retained });
+      } else {
+        registration = { dir: rt.dir, name: retained.name, orgUrl: target.url, workFolder, token, labels: "", packagePath: null, reusePackage: true };
+        const result = await registerRunner(registration, [], progress);
+        if (!result.ok) throw new Error(result.error ?? "重新注册失败");
+        rt.meta = await readRunnerMeta(rt.dir);
+        if (!rt.meta.configured) throw new Error("重新注册后未找到有效配置");
+        rt.lastError = null;
+        this.#config = upsertInstance(this.#config, { id: rt.id, dir: rt.dir, autoStart: false });
+      }
+      await saveConfig(this.#config);
+      this.#runnerOperation.status = "ok";
+      this.#runnerOperation.message = removing ? "已从 GitHub 注销；本地安装包、工作文件和日志已保留" : "已重新注册；工作文件保持不变，可点击启动";
+      this.#task = { kind: input.action, status: "ok", message: this.#runnerOperation.message };
+      this.#authorization = { status: "cleared", message: "本次临时凭据已清理" };
+    } catch (error) {
+      const message = controller.signal.aborted ? "授权已取消，未执行注销或重新注册" : error instanceof Error ? error.message : String(error);
+      const detail = removed ? `GitHub 已注销，但保存本机记录失败：${message}` : message;
+      this.#runnerOperation.status = "error";
+      this.#runnerOperation.message = detail;
+      this.#task = { kind: input.action, status: "error", message: detail };
+      this.#authorization = { status: controller.signal.aborted ? "cancelled" : "error", message: detail };
+    } finally {
+      token = "";
+      input.token = "";
+      if (registration) registration.token = "";
+      this.#authController = null;
+      this.#operationId = null;
+      this.#emit();
+    }
+  }
+
   async destroy(): Promise<void> {
     this.#authController?.abort();
     if (this.#tickTimer) clearInterval(this.#tickTimer);
@@ -576,9 +709,15 @@ export class Fleet {
     let changed = false;
     for (const dir of dirs) {
       try {
+        if (this.#operationId === instanceIdOf(dir)) continue;
         const rt = this.#ensureRt(dir, true);
-        rt.meta = await readRunnerMeta(dir);
+        const meta = await readRunnerMeta(dir);
+        if (this.#operationId === rt.id) continue;
+        rt.meta = meta;
         const cfgAuto = config.instances.find((i) => i.dir === dir || i.id === rt.id);
+        if (!rt.meta.configured && cfgAuto?.unregistered) {
+          rt.meta = { ...rt.meta, agentName: cfgAuto.unregistered.name, gitHubUrl: cfgAuto.unregistered.targetUrl, workFolder: cfgAuto.unregistered.workFolder };
+        }
         rt.autoStart = cfgAuto?.autoStart ?? false;
         if (!cfgAuto && this.#persist) {
           config.instances = upsertInstance(config, { id: rt.id, dir, autoStart: false }).instances;
@@ -654,12 +793,16 @@ export class Fleet {
   }
 
   async #tick(): Promise<void> {
+    if (this.#ticking || this.#operationId !== null) return;
+    this.#ticking = true;
     try {
       await this.#syncInstances();
       await this.#reconcileExternal();
       await this.#refreshPackages();
     } catch {
       /* 轮询容错 */
+    } finally {
+      this.#ticking = false;
     }
   }
 
@@ -702,8 +845,9 @@ export class Fleet {
       name: rt.meta?.agentName ?? rt.id,
       agentId: rt.meta?.agentId ?? null,
       orgUrl: rt.meta?.gitHubUrl ?? null,
-      workFolder: rt.meta?.workFolder ?? null,
+      workFolder: rt.meta?.workFolder ? resolve(rt.dir, rt.meta.workFolder) : null,
       configured: rt.meta?.configured ?? false,
+      unregistered: !rt.meta?.configured && Boolean(this.#config?.instances.find((item) => item.id === rt.id)?.unregistered),
       processState: rt.processState,
       external: rt.external,
       autoStart: rt.autoStart,

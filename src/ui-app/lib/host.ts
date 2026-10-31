@@ -14,6 +14,7 @@ export interface InstanceView {
   orgUrl: string | null;
   workFolder: string | null;
   configured: boolean;
+  unregistered?: boolean;
   processState: "stopped" | "starting" | "running" | "stopping";
   external: boolean;
   autoStart: boolean;
@@ -62,7 +63,7 @@ class HostStore {
     if (msg.kind === "summary") {
       this.summary = msg as unknown as SummaryPush;
       const task = this.summary.task;
-      if (task.kind === "register") announceTask(task);
+      if (task.kind !== "none") announceTask(task);
     } else if (msg.kind === "log") {
       const { id, lines, truncated } = msg as unknown as {
         id: string;

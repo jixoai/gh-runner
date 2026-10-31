@@ -17,6 +17,7 @@ import {
   IS_WIN,
   PLATFORM,
   registerSpawn,
+  unregisterSpawn,
   defaultLabels,
   basenameOf,
   isAbsolutePath,
@@ -31,6 +32,7 @@ export interface RegisterRequest {
   workFolder: string;
   /** 选定的分发包（下载缓存或导入的本地路径）；null 时回退旧版自动探测（searchDirs 内）。 */
   packagePath: string | null;
+  reusePackage?: boolean;
 }
 
 export type ProgressSink = (line: string) => void;
@@ -146,25 +148,27 @@ export async function registerRunner(
     }
 
     if (!req.token.trim()) throw new Error("缺少 runner 注册 Token（有效期 1 小时）");
-    const pkg = await validateNewRunner(req, searchDirs);
+    const pkg = req.reusePackage ? null : await validateNewRunner(req, searchDirs);
     if (!existsSync(dir)) {
       onProgress(`创建目录 ${dir}`);
       await mkdir(dir, { recursive: true });
     }
 
-    onProgress(`使用分发包 ${basenameOf(pkg)}`);
+    if (pkg) {
+      onProgress(`使用分发包 ${basenameOf(pkg)}`);
 
-    // bsdtar 自动识别 tar.gz/zip（macOS、Linux、Win10+ 内置）
-    await runStep("解包分发包", "tar", ["-xf", pkg], dir, onProgress);
-    if (PLATFORM === "darwin") {
-      // quarantine 仅存在于 macOS；Linux 无 xattr 命令，Windows 无此概念
-      await runStep(
-        "移除 quarantine 隔离标记",
-        "xattr",
-        ["-rd", "com.apple.quarantine", "."],
-        dir,
-        onProgress,
-      );
+      // bsdtar 自动识别 tar.gz/zip（macOS、Linux、Win10+ 内置）
+      await runStep("解包分发包", "tar", ["-xf", pkg], dir, onProgress);
+      if (PLATFORM === "darwin") {
+        // quarantine 仅存在于 macOS；Linux 无 xattr 命令，Windows 无此概念
+        await runStep(
+          "移除 quarantine 隔离标记",
+          "xattr",
+          ["-rd", "com.apple.quarantine", "."],
+          dir,
+          onProgress,
+        );
+      }
     }
 
     const reg = registerSpawn(dir);
@@ -199,5 +203,16 @@ export async function registerRunner(
     const message = err instanceof Error ? err.message : String(err);
     onProgress(`✘ 注册失败：${message}`);
     return { ok: false, error: message, runnerDir: dir };
+  }
+}
+
+export async function unregisterRunner(dir: string, token: string, onProgress: ProgressSink): Promise<void> {
+  if (!isAbsolutePath(dir)) throw new Error("实例目录必须是绝对路径");
+  if (!token.trim()) throw new Error("缺少 runner 注销 Token（不是注册 Token 或 PAT）");
+  if (!existsSync(join(dir, ".runner"))) throw new Error("本机注册配置已缺失，请在 GitHub 设置中确认或移除线上 runner");
+  const command = unregisterSpawn(dir);
+  await runStep("注销 GitHub runner", command.file, [...command.prefixArgs, "--unattended"], dir, onProgress, token.trim());
+  if (existsSync(join(dir, ".runner")) || existsSync(join(dir, ".credentials")) || existsSync(join(dir, ".credentials_rsaparams"))) {
+    throw new Error("注销命令未清理本机连接配置，请检查日志；工作文件已保留");
   }
 }

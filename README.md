@@ -29,6 +29,13 @@ npx @jixoai/gh-runner          # 或：pnpm dlx @jixoai/gh-runner / npm i -g @ji
   可取消尚未完成的授权；部分失败不影响已成功的实例，并可返回编辑失败项。
   也保留「已有注册 Token」方式（有效期 1 小时，不是 PAT）。
 - **启动/停止**：卡片按钮。作业中强停会弹确认（作业将被 GitHub 标记为失败）。
+- **注销 runner**：卡片「注销…」→ 核对目标与工作目录 → 手机 / 浏览器重新授权，或填写 GitHub
+  移除页面给出的**注销 Token**（不是注册 Token / PAT）。授权后停止实例并执行官方注销命令，
+  同步移除 GitHub 注册、清理本机连接凭据。作业中禁止注销；外部终端或系统服务管理的实例需先停止。
+- **保留与复用**：注销不删除安装包、工作文件或日志，实例保留为「已注销 · 文件保留」，且关闭自启。
+  「打开工作目录」可直接在文件管理器中查看、手动删除工作文件；目录已删除时会提示错误，不会自动删除其他路径。
+  保留安装文件后可点击「重新注册」，重新授权、复用原目录和实例名称，无需再次解包，也不清空工作文件。
+  重新注册生成新的 GitHub runner 身份，完成后保持停止，由用户点击启动。若安装文件也已删除，需重新下载分发包并添加实例。
 - **日志分析**：右侧面板实时滚动所选实例的 `_diag` 控制台行；绿=成功、红=失败、蓝=作业开始，
   时间戳恒为中性灰。卡片上常驻「最近动作」的结果与耗时。
 - **托盘菜单**：每实例直达（状态一览）、打开面板、退出。
@@ -80,6 +87,8 @@ Linux：opentray 的 ext-webview/dialog 不发布 Linux 原生运行时，暂不
 GitHub 上的应用授权及已签发 Token 仍按 GitHub 规则有效，用户可在 GitHub 设置中自行撤销。
 已注册 runner 保留自身连接凭据并继续运行；本机管理权限、恶意软件、崩溃转储与不可信工作流仍是安全边界。
 批量创建只覆盖同一目标；增加不同目标的 runner 需要单独发起注册。
+注销与重新注册同样不保存账号访问凭据；注销时申请独立的 remove-token，短期 Token 仅通过环境变量传给官方命令。
+注销 runner 不等于撤销 GitHub App 的账号授权；工作文件可以包含仓库内容或任务生成的秘密，请按需自行清理。
 
 参考：[GitHub App Device Flow](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app)
 及 [self-hosted runners REST API](https://docs.github.com/en/rest/actions/self-hosted-runners)。

@@ -78,6 +78,7 @@ export class UiHost {
     private readonly pickRunnerDir: () => Promise<string | null>,
     /** 默认浏览器打开外部链接（ext-opener open）。 */
     private readonly openExternal: (url: string) => Promise<void>,
+    private readonly onOpenWorkDir: (id: string) => Promise<void> = async () => {},
   ) {}
 
   open(): Promise<void> {
@@ -251,6 +252,7 @@ export class UiHost {
         authorization: snap.authorization,
         registrationDefaults: snap.registrationDefaults,
         registrationBatch: snap.registrationBatch,
+        runnerOperation: snap.runnerOperation,
       };
       await this.#evaluate(JSON.stringify(summary));
       for (const inst of snap.instances) {
@@ -390,6 +392,17 @@ export class UiHost {
       }
       case "open-diag": {
         this.onOpenDiag(cmd.id);
+        break;
+      }
+      case "open-work-dir": {
+        try { await this.onOpenWorkDir(cmd.id); }
+        catch (error) { this.fleet.reportPickerFailure("打开工作目录", error); }
+        break;
+      }
+      case "runner-operation": {
+        const request = { ...cmd };
+        cmd.token = "";
+        void this.fleet.operateRunner(request).catch((error) => this.fleet.reportPickerFailure("runner 操作", error)).finally(() => { request.token = ""; });
         break;
       }
       case "open-url": {

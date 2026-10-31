@@ -8,8 +8,8 @@
  * 3. 验证模式：--dry-run 无头打印快照；--smoke 起真实托盘+窗口并等待页面 hello/ack 后落盘诊断。
  */
 
-import { writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { stat, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createTray, type OpenTrayRuntimeOptions } from "opentray";
 import { attachDialog } from "@opentray/ext-dialog";
@@ -241,6 +241,13 @@ async function main(): Promise<void> {
       }
     },
     (url) => opener.open(url),
+    async (id) => {
+      const view = fleet.view(id);
+      if (!view?.workFolder) throw new Error("实例没有工作目录记录");
+      const path = resolve(view.dir, view.workFolder);
+      if (!(await stat(path)).isDirectory()) throw new Error("工作目录不存在或不是文件夹");
+      await opener.open(path);
+    },
   );
 
   let stopSnapshots = () => {};

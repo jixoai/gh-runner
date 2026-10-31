@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { InstanceCard } from "@/components/instance-card";
 import { LogPane } from "@/components/log-pane";
 import { RegisterDialog } from "@/components/register-dialog";
-import { setTaskAnnouncer, store } from "@/lib/host";
+import { RunnerOperationDialog } from "@/components/runner-operation-dialog";
+import { setTaskAnnouncer, store, type InstanceView } from "@/lib/host";
 import { useStore, useTicker } from "@/lib/hooks";
 import { Toaster, toast } from "sonner";
 
@@ -15,6 +16,7 @@ export function App() {
   const summary = store.summary;
   const [selected, setSelected] = useState<string | null>(null);
   const [registerOpen, setRegisterOpen] = useState(false);
+  const [managed, setManaged] = useState<InstanceView | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
   useEffect(() => {
@@ -56,11 +58,12 @@ export function App() {
           size="sm"
           className="h-7 gap-1 text-xs"
           title="选择已有 runner 的目录（含 .runner），免 Token 接入管理；work 目录自动恢复"
+          disabled={summary?.task.status === "running"}
           onClick={() => store.send({ type: "import-runner-dir" })}
         >
           <FolderInput className="size-3.5" /> 导入 runner 目录
         </Button>
-        <Button size="sm" className="h-7 gap-1 text-xs" onClick={() => setRegisterOpen(true)}>
+        <Button size="sm" className="h-7 gap-1 text-xs" disabled={summary?.task.status === "running"} onClick={() => setRegisterOpen(true)}>
           <Plus className="size-3.5" /> 注册新实例
         </Button>
       </Glass>
@@ -80,6 +83,8 @@ export function App() {
                 selected={inst.id === effectiveSelected}
                 onSelect={setSelected}
                 tick={tick}
+                onManage={setManaged}
+                operationBusy={summary?.task.status === "running"}
               />
             ))
           )}
@@ -95,6 +100,7 @@ export function App() {
       </main>
 
       {registerOpen && <RegisterDialog open onOpenChange={setRegisterOpen} summary={summary} />}
+      {managed && <RunnerOperationDialog inst={managed} summary={summary} onClose={() => setManaged(null)} />}
       <Toaster position="top-center" richColors closeButton />
     </div>
   );

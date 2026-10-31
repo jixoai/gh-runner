@@ -212,7 +212,7 @@ function Field({ id, label, hint, children }: { id: string; label: string; hint?
   return <div className="grid gap-1.5"><Label htmlFor={id} className="text-xs">{label}</Label>{children}{hint && <p className="text-xs leading-relaxed text-muted-foreground">{hint}</p>}</div>;
 }
 
-function DeviceAuthorization({ code, uri, expiresAt }: { code: string; uri: string; expiresAt: number }) {
+export function DeviceAuthorization({ code, uri, expiresAt }: { code: string; uri: string; expiresAt: number }) {
   const tick = useTicker();
   const [image, setImage] = useState("");
   const [copied, setCopied] = useState(false);

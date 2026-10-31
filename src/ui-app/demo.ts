@@ -4,7 +4,7 @@
  */
 
 import { store, type UiCommand } from "./lib/host";
-import type { AuthorizationState, RegistrationBatchState } from "../types.ts";
+import type { AuthorizationState, RegistrationBatchState, RunnerOperationState, RunnerOperationRequest } from "../types.ts";
 
 interface DemoInstance {
   id: string;
@@ -14,6 +14,7 @@ interface DemoInstance {
   orgUrl: string | null;
   workFolder: string | null;
   configured: boolean;
+  unregistered?: boolean;
   processState: "stopped" | "starting" | "running" | "stopping";
   external: boolean;
   autoStart: boolean;
@@ -88,9 +89,11 @@ let download: { status: "running" | "ok" | "error"; pct: number; message: string
 let authorization: AuthorizationState | null = null;
 let registrationBatch: RegistrationBatchState | null = null;
 let pendingBatch: Extract<UiCommand, { type: "register-batch" }> | null = null;
+let runnerOperation: RunnerOperationState | null = null;
+let pendingOperation: RunnerOperationRequest | null = null;
 
 const task = { kind: "none", status: "ok", message: null } as {
-  kind: "none" | "register";
+  kind: "none" | "register" | "unregister" | "reregister";
   status: "ok" | "running" | "error";
   message: string | null;
 };
@@ -119,6 +122,7 @@ function sink(): void {
     download: download ? { ...download } : null,
     authorization: authorization ? { ...authorization } : null,
     registrationBatch: structuredClone(registrationBatch),
+    runnerOperation: runnerOperation ? { ...runnerOperation } : null,
     registrationDefaults: { parentDir: "/Users/demo/actions-runners", name: "mac-build", clientId: "demo-github-app" },
   });
   for (const inst of instances) {
@@ -132,6 +136,30 @@ function sink(): void {
 
 export const demoHost = {
   authorize(): void {
+    if (pendingOperation) {
+      const command = pendingOperation;
+      pendingOperation = null;
+      authorization = { status: "registering", message: "正在处理 runner（演示）" };
+      sink();
+      setTimeout(() => {
+        const inst = instances.find((item) => item.id === command.id);
+        if (!inst || !runnerOperation) return;
+        inst.configured = command.action === "reregister";
+        inst.unregistered = !inst.configured;
+        inst.processState = "stopped";
+        inst.currentJob = null;
+        inst.pid = null;
+        inst.autoStart = false;
+        inst.agentId = inst.configured ? 5001 : null;
+        runnerOperation.status = "ok";
+        runnerOperation.message = inst.configured ? "已重新注册，文件保持不变（演示）" : "已从 GitHub 注销，工作文件已保留（演示）";
+        authorization = { status: "cleared", message: "临时凭据已清理（演示）" };
+        task.status = "ok";
+        task.message = runnerOperation.message;
+        sink();
+      }, 600);
+      return;
+    }
     const command = pendingBatch;
     if (!command || !registrationBatch) return;
     pendingBatch = null;
@@ -172,6 +200,29 @@ export const demoHost = {
   command(cmd: UiCommand): void {
     if (cmd.type === "ack" || cmd.type === "hello") return;
     const inst = "id" in cmd ? instances.find((i) => i.id === cmd.id) : undefined;
+    if (cmd.type === "open-work-dir") {
+      task.kind = "none";
+      task.status = "ok";
+      task.message = "演示模式不会打开本机文件夹";
+    }
+    if (cmd.type === "runner-operation" && inst) {
+      pendingOperation = { ...cmd, token: "" };
+      cmd.token = "";
+      runnerOperation = { requestId: cmd.requestId, id: cmd.id, action: cmd.action, status: "running", message: "等待授权（演示）" };
+      task.kind = cmd.action;
+      task.status = "running";
+      task.message = runnerOperation.message;
+      authorization = { status: "waiting", userCode: "DEMO-2026", verificationUri: "https://github.com/login/device", expiresAt: Date.now() + 900_000, message: "请使用模拟确认按钮" };
+      if (cmd.method === "token") demoHost.authorize();
+    }
+    if (cmd.type === "cancel-authorization" && pendingOperation && runnerOperation) {
+      pendingOperation = null;
+      runnerOperation.status = "error";
+      runnerOperation.message = "授权已取消，未执行操作（演示）";
+      authorization = { status: "cancelled", message: runnerOperation.message };
+      task.status = "error";
+      task.message = runnerOperation.message;
+    }
     if (cmd.type === "start" && inst) {
       inst.processState = "running";
       addLog(inst, ts() + " Listening for Jobs");

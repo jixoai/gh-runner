@@ -1,4 +1,4 @@
-import { Play, Square, FolderOpen, TriangleAlert } from "lucide-react";
+import { Play, Square, FolderOpen, TriangleAlert, Unplug, RotateCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -29,13 +29,17 @@ export function InstanceCard({
   selected,
   onSelect,
   tick,
+  onManage,
+  operationBusy = false,
 }: {
   inst: InstanceView;
   selected: boolean;
   onSelect: (id: string) => void;
   tick: number;
+  onManage: (inst: InstanceView) => void;
+  operationBusy?: boolean;
 }) {
-  const startable = inst.processState === "stopped" && inst.configured;
+  const startable = inst.processState === "stopped" && inst.configured && !operationBusy;
   const stoppable = inst.processState === "running" || inst.processState === "starting";
   const busy = inst.currentJob !== null;
 
@@ -76,7 +80,7 @@ export function InstanceCard({
         )}
         {!inst.configured && (
           <Badge variant="outline" className="border-transparent bg-warn/15 px-2 text-[11px] text-warn">
-            未注册
+            {inst.unregistered ? "已注销 · 文件保留" : "未注册"}
           </Badge>
         )}
         <div className="ml-auto flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
@@ -104,7 +108,7 @@ export function InstanceCard({
                   size="icon"
                   variant="ghost"
                   className="size-7"
-                  disabled={!inst.configured}
+                  disabled={!inst.configured && !inst.unregistered}
                   onClick={() => store.send({ type: "open-diag", id: inst.id })}
                 >
                   <FolderOpen className="size-3.5" />
@@ -118,6 +122,7 @@ export function InstanceCard({
             title="工具启动时自动拉起该实例"
           >
             <Switch
+              disabled={!inst.configured || operationBusy}
               checked={inst.autoStart}
               onCheckedChange={(v) => store.send({ type: "set-auto-start", id: inst.id, value: v })}
               aria-label="自动启动"
@@ -129,6 +134,15 @@ export function InstanceCard({
 
       <div className="text-xs text-muted-foreground">
         #{inst.agentId ?? "—"} · <span className="truncate align-middle">{inst.dir}</span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" disabled={!inst.workFolder} onClick={() => store.send({ type: "open-work-dir", id: inst.id })}>
+          <FolderOpen className="size-3.5" />打开工作目录
+        </Button>
+        {(inst.configured || inst.unregistered) && <Button size="sm" variant="ghost" className="ml-auto h-7 px-2 text-xs" disabled={operationBusy} onClick={() => onManage(inst)}>
+          {inst.unregistered ? <RotateCw className="size-3.5" /> : <Unplug className="size-3.5" />}{inst.unregistered ? "重新注册" : "注销…"}
+        </Button>}
       </div>
 
       <div className="grid min-h-5 gap-0.5 text-xs">

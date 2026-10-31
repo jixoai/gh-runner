@@ -52,6 +52,11 @@ export function registerSpawn(dir: string): { file: string; prefixArgs: string[]
   return { file: "./config.sh", prefixArgs: [] };
 }
 
+export function unregisterSpawn(dir: string, platform: NodeJS.Platform = PLATFORM): { file: string; prefixArgs: string[] } {
+  if (platform === "win32") return { file: join(dir, "bin", "Runner.Listener.exe"), prefixArgs: ["remove"] };
+  return { file: "./config.sh", prefixArgs: ["remove"] };
+}
+
 /** labels 默认值（UI 预填）。 */
 export function defaultLabels(): string {
   if (PLATFORM === "darwin") return "self-hosted,macOS,ARM64";

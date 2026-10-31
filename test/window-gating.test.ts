@@ -183,4 +183,23 @@ describe("UiHost 可见性门控（闪窗回归）", () => {
     expect(fleet.cancelAuthorization).toHaveBeenCalledOnce();
     await ui.destroy();
   });
+
+  it("注销授权等待时仍可取消，工作目录命令只传实例 ID", async () => {
+    const f = fakeWindow();
+    const fleet = { operateRunner: vi.fn(() => new Promise<void>(() => {})), cancelAuthorization: vi.fn() };
+    const openWorkDir = vi.fn(async () => {});
+    const ui = new UiHost(fleet as never, { createWebviewWindow: () => f.win } as never, () => {}, async () => null, async () => null, async () => {}, openWorkDir);
+    try {
+      await ui.open();
+      const command = { type: "runner-operation", requestId: "remove-test", id: "runner-1", action: "unregister", method: "token", token: "REMOVE_SECRET" };
+      f.win.drainIpcMessages.mockResolvedValueOnce([{ payload: command }]);
+      await vi.advanceTimersByTimeAsync(160);
+      expect(fleet.operateRunner).toHaveBeenCalledOnce();
+      expect(command.token).toBe("");
+      f.win.drainIpcMessages.mockResolvedValueOnce([{ payload: { type: "cancel-authorization" } }, { payload: { type: "open-work-dir", id: "runner-1" } }]);
+      await vi.advanceTimersByTimeAsync(160);
+      expect(fleet.cancelAuthorization).toHaveBeenCalledOnce();
+      expect(openWorkDir).toHaveBeenCalledWith("runner-1");
+    } finally { await ui.destroy(); }
+  });
 });
