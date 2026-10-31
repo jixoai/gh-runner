@@ -442,6 +442,18 @@ export class UiHost {
         void this.fleet.downloadLatest();
         break;
       }
+      case "pause-download": {
+        this.fleet.pauseDownload();
+        break;
+      }
+      case "resume-download": {
+        this.fleet.resumeDownload();
+        break;
+      }
+      case "cancel-download": {
+        this.fleet.cancelDownload();
+        break;
+      }
       case "import-package": {
         // 系统文件选择对话框（ext-dialog）；取消返回 null。
         const picked = await this.pickPackageFile();

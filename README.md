@@ -21,7 +21,9 @@ npx @jixoai/gh-runner          # 或：pnpm dlx @jixoai/gh-runner / npm i -g @ji
   （每批 1–10 个）。默认按本机名称递增命名，并为每个实例生成独立的实例目录和 Work 目录；
   可展开自定义。全批共用分发包与授权，选择来源：
   - `⤓ 最新`：从 [actions/runner](https://github.com/actions/runner/releases) 官方 release
-    下载当前平台最新包（带进度条，缓存到 `gh-runner/packages/`）；
+    下载当前平台最新包（带进度条，缓存到 `gh-runner/packages/`）。支持暂停、继续和取消；
+    暂停会断开下载连接，继续时在服务器支持 Range 与文件校验标识时断点续传，否则重新下载。
+    取消或退出应用会清理未完成的 `.part` 文件，不影响已下载完成的包；
   - `导入…`：系统文件选择框选择本地已有包（`tar.gz` / `zip`）；
   - 选择列表中此前下载/导入的任意包。
   分发包准备好后，选择「手机 / 浏览器授权」：手机扫码打开 GitHub 官方设备授权页，输入

@@ -36,8 +36,7 @@ import { authorizeRunners, githubClientId } from "./github-auth.ts";
 import { parseRunnerTarget } from "./github-target.ts";
 import {
   listPackages,
-  fetchLatestReleaseInfo,
-  downloadPackage,
+  PackageDownload,
   type DownloadState,
 } from "./packages.ts";
 import { ARCH, PLATFORM, isAbsolutePath, registerSpawn } from "./platform.ts";
@@ -114,7 +113,9 @@ export class Fleet {
   #ticking = false;
   #persist = true;
   #download: DownloadState | null = null;
-  #downloading = false;
+  #downloadJob: PackageDownload | null = null;
+  #downloadPromise: Promise<void> | null = null;
+  #downloadClearTimer: NodeJS.Timeout | null = null;
   #authorization: AuthorizationState | null = null;
   #registrationBatch: RegistrationBatchState | null = null;
   #authController: AbortController | null = null;
@@ -207,36 +208,37 @@ export class Fleet {
   }
 
   /** 下载 actions/runner 最新平台的包（进度写入 snapshot.download，完成后刷新清单）。 */
-  async downloadLatest(): Promise<void> {
-    if (this.#downloading) return;
-    this.#downloading = true;
-    this.#download = { status: "running", pct: 0, message: "查询最新 release…" };
-    this.#emitSoon();
-    try {
-      const release = await fetchLatestReleaseInfo();
-      this.#download = { status: "running", pct: 0, message: `下载 ${release.assetName}` };
+  downloadLatest(): Promise<void> {
+    if (this.#downloadPromise) return this.#downloadPromise;
+    if (this.#downloadClearTimer) clearTimeout(this.#downloadClearTimer);
+    const job = new PackageDownload((state) => {
+      this.#download = state;
       this.#emitSoon();
-      const dest = await downloadPackage(release, (pct) => {
-        this.#download = { status: "running", pct, message: `下载 ${release.assetName}` };
+    });
+    this.#downloadJob = job;
+    this.#downloadPromise = (async () => {
+      try {
+        if (await job.run()) await this.#refreshPackages();
+      } finally {
+        this.#downloadJob = null;
+        this.#downloadPromise = null;
         this.#emitSoon();
-      });
-      this.#download = { status: "ok", pct: 100, message: `已下载 ${dest}` };
-      await this.#refreshPackages();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.#download = { status: "error", pct: 0, message };
-    } finally {
-      this.#downloading = false;
-      this.#emitSoon();
-      // 成功态停留一段时间后清除
-      setTimeout(() => {
-        if (this.#download && this.#download.status !== "running") {
-          this.#download = null;
-          this.#emitSoon();
+        if (this.#download?.status === "ok") {
+          this.#downloadClearTimer = setTimeout(() => {
+            this.#downloadClearTimer = null;
+            this.#download = null;
+            this.#emitSoon();
+          }, 8000);
+          this.#downloadClearTimer.unref?.();
         }
-      }, 8000).unref?.();
-    }
+      }
+    })();
+    return this.#downloadPromise;
   }
+
+  pauseDownload(): void { this.#downloadJob?.pause(); }
+  resumeDownload(): void { this.#downloadJob?.resume(); }
+  cancelDownload(): void { this.#downloadJob?.cancel(); }
 
   /** 通过系统文件选择对话框导入本地包路径（登记进 config，不复制）。 */
   async importPackage(path: string): Promise<void> {
@@ -666,6 +668,11 @@ export class Fleet {
 
   async destroy(): Promise<void> {
     this.#authController?.abort();
+    this.#downloadJob?.cancel();
+    await this.#downloadPromise;
+    if (this.#downloadClearTimer) clearTimeout(this.#downloadClearTimer);
+    if (this.#debounceTimer) clearTimeout(this.#debounceTimer);
+    this.#debounceTimer = null;
     if (this.#tickTimer) clearInterval(this.#tickTimer);
     this.#tickTimer = null;
     for (const rt of this.#rts.values()) rt.tail?.stop();

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, Check, CheckCircle2, Copy, Download, ExternalLink, FolderInput, Loader2, Plus, ShieldCheck, Trash2, XCircle } from "lucide-react";
+import { ArrowLeft, Check, CheckCircle2, Copy, Download, ExternalLink, FolderInput, Loader2, Pause, Play, Plus, ShieldCheck, Square, Trash2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -41,7 +41,7 @@ export function RegisterDialog({ open, onOpenChange, summary }: {
   const packages = summary?.packages ?? [];
   const selectedPkg = packagePath || packages.find((pkg) => pkg.compatible)?.path || "";
   const download = summary?.download;
-  const downloading = download?.status === "running";
+  const downloading = download != null && ["running", "paused", "cancelling"].includes(download.status);
   const completed = batch?.items.filter((item) => item.status === "ok").length ?? 0;
   const finished = stage === "progress" && !busy;
   let target: ReturnType<typeof parseRunnerTarget> | null = null;
@@ -150,11 +150,20 @@ export function RegisterDialog({ open, onOpenChange, summary }: {
                   <SelectContent>{packages.map((pkg) => <SelectItem key={pkg.path} value={pkg.path} disabled={!pkg.compatible}>{pkg.name}{!pkg.compatible ? " · 不兼容当前平台" : ""}</SelectItem>)}</SelectContent>
                 </Select>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <Button variant="outline" size="sm" disabled={downloading} onClick={() => store.send({ type: "download-latest" })}>{downloading ? <Loader2 className="size-4 animate-spin motion-reduce:animate-none" /> : <Download className="size-4" />}下载最新版</Button>
-                  <Button variant="ghost" size="sm" disabled={downloading} onClick={() => store.send({ type: "import-package" })}><FolderInput className="size-4" />导入已有包</Button>
+                  <Button variant="outline" size="sm" disabled={downloading} onClick={() => store.send({ type: "download-latest" })}><Download className="size-4" />{download?.status === "error" ? "重新下载" : "下载最新版"}</Button>
+                  <Button variant="ghost" size="sm" onClick={() => store.send({ type: "import-package" })}><FolderInput className="size-4" />导入已有包</Button>
                 </div>
                 <p className="mt-2 text-xs text-muted-foreground">本批共用一个分发包，仅下载一次，分别解包到独立目录。</p>
-                {download && <div className="mt-3" role="status">{downloading && <Progress value={download.pct} aria-label="分发包下载进度" />}<p className={`mt-1 break-words text-xs ${download.status === "error" ? "text-bad" : "text-muted-foreground"}`}>{downloading ? `${download.pct}% · ` : ""}{download.message}</p></div>}
+                {download && <div className="mt-3 space-y-2">
+                  {downloading && <Progress value={download.pct} aria-label="分发包下载进度" />}
+                  <p role="status" className={`break-words text-xs ${download.status === "error" ? "text-bad" : "text-muted-foreground"}`}>{downloading ? `${download.pct}% · ` : ""}{download.message}</p>
+                  {downloading && <div className="flex flex-wrap gap-2">
+                    {download.status === "running" && <Button variant="outline" size="sm" onClick={() => store.send({ type: "pause-download" })}><Pause className="size-4" />暂停下载</Button>}
+                    {download.status === "paused" && <Button variant="outline" size="sm" onClick={() => store.send({ type: "resume-download" })}><Play className="size-4" />继续下载</Button>}
+                    <Button variant="ghost" size="sm" disabled={download.status === "cancelling"} onClick={() => store.send({ type: "cancel-download" })}><Square className="size-4" />{download.status === "cancelling" ? "正在取消…" : "取消下载"}</Button>
+                  </div>}
+                  {downloading && <p className="text-xs text-muted-foreground">关闭此面板不会停止下载；退出应用会取消并清理未完成文件。</p>}
+                </div>}
               </section>
               <section aria-labelledby={`${id}-method`}>
                 <h3 id={`${id}-method`} className="mb-3 text-sm font-semibold">授权方式</h3>

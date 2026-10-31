@@ -4,7 +4,7 @@
  */
 
 import { store, type UiCommand } from "./lib/host";
-import type { AuthorizationState, RegistrationBatchState, RunnerOperationState, RunnerOperationRequest } from "../types.ts";
+import type { AuthorizationState, DownloadState, RegistrationBatchState, RunnerOperationState, RunnerOperationRequest } from "../types.ts";
 
 interface DemoInstance {
   id: string;
@@ -85,7 +85,8 @@ const packages = [
   { path: "/Volumes/bnqkl/Users/kzf/actions-runner/actions-runner-osx-arm64-2.338.1.tar.gz", name: "actions-runner-osx-arm64-2.338.1.tar.gz", sizeBytes: 214 * 1024 * 1024, mtimeMs: now - 3600_000, compatible: true },
   { path: "/Users/kzf/Downloads/actions-runner-win-x64-2.339.0.zip", name: "actions-runner-win-x64-2.339.0.zip", sizeBytes: 198 * 1024 * 1024, mtimeMs: now - 86_400_000, compatible: false },
 ];
-let download: { status: "running" | "ok" | "error"; pct: number; message: string } | null = null;
+let download: DownloadState | null = null;
+let downloadTimer: ReturnType<typeof setInterval> | null = null;
 let authorization: AuthorizationState | null = null;
 let registrationBatch: RegistrationBatchState | null = null;
 let pendingBatch: Extract<UiCommand, { type: "register-batch" }> | null = null;
@@ -273,19 +274,32 @@ export const demoHost = {
       task.message = "授权已取消（演示）";
     }
     if (cmd.type === "download-latest") {
-      if (download && download.status === "running") return;
+      if (download && ["running", "paused", "cancelling"].includes(download.status)) return;
       download = { status: "running", pct: 0, message: "下载 actions-runner-osx-arm64-2.340.0.tar.gz（演示）" };
       let pct = 0;
-      const t = setInterval(() => {
-        pct = Math.min(100, pct + Math.ceil(Math.random() * 18));
+      downloadTimer = setInterval(() => {
+        if (download?.status !== "running") return;
+        pct = Math.min(100, pct + 2);
         download = { status: "running", pct, message: "下载 actions-runner-osx-arm64-2.340.0.tar.gz（演示）" };
         if (pct >= 100) {
-          clearInterval(t);
+          if (downloadTimer) clearInterval(downloadTimer);
+          downloadTimer = null;
           download = { status: "ok", pct: 100, message: "已下载 actions-runner-osx-arm64-2.340.0.tar.gz（演示）" };
           packages.unshift({ path: "/Users/kzf/Library/Application Support/gh-runner/packages/actions-runner-osx-arm64-2.340.0.tar.gz", name: "actions-runner-osx-arm64-2.340.0.tar.gz", sizeBytes: 221 * 1024 * 1024, mtimeMs: Date.now(), compatible: true });
         }
         sink();
       }, 400);
+    }
+    if (cmd.type === "pause-download" && download?.status === "running") {
+      download = { ...download, status: "paused", message: "已暂停；继续时优先断点续传，服务器不支持时重新下载（演示）" };
+    }
+    if (cmd.type === "resume-download" && download?.status === "paused") {
+      download = { ...download, status: "running", message: "继续下载分发包（演示）" };
+    }
+    if (cmd.type === "cancel-download" && download && ["running", "paused"].includes(download.status)) {
+      if (downloadTimer) clearInterval(downloadTimer);
+      downloadTimer = null;
+      download = { ...download, status: "cancelled", message: "已取消，未完成的下载已清理（演示）" };
     }
     if (cmd.type === "import-package") {
       packages.unshift({ path: "/Users/kzf/Downloads/actions-runner-osx-arm64-2.341.0.tar.gz", name: "actions-runner-osx-arm64-2.341.0.tar.gz", sizeBytes: 223 * 1024 * 1024, mtimeMs: Date.now(), compatible: true });

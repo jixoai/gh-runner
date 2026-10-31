@@ -75,7 +75,7 @@ export interface PackageInfo {
 }
 
 export interface DownloadState {
-  status: "running" | "ok" | "error";
+  status: "running" | "paused" | "cancelling" | "cancelled" | "ok" | "error";
   /** 0-100。 */
   pct: number;
   message: string;
@@ -190,6 +190,9 @@ export type UiCommand =
   | ({ type: "runner-operation" } & RunnerOperationRequest)
   | { type: "open-url"; url: string }
   | { type: "download-latest" }
+  | { type: "pause-download" }
+  | { type: "resume-download" }
+  | { type: "cancel-download" }
   | { type: "import-package" }
   | { type: "import-runner-dir" }
   | { type: "cancel-authorization" }
