@@ -6,6 +6,7 @@
 import { store, type UiCommand } from "./lib/host";
 import type { AuthorizationState, DownloadState, RegistrationBatchState, RunnerOperationState, RunnerOperationRequest } from "../types.ts";
 import { downloadTemplateError } from "../download-source.ts";
+import { resolvePackageSelection, runnerPackageName } from "../runner-package.ts";
 
 interface DemoInstance {
   id: string;
@@ -282,17 +283,29 @@ export const demoHost = {
         sink();
         return;
       }
-      download = { status: "running", pct: 0, message: "下载 actions-runner-osx-arm64-2.340.0.tar.gz（演示）", network: "系统代理 · HTTPS 127.0.0.1:7890 · HTTP 127.0.0.1:7890（演示）", source: cmd.sourceTemplate?.trim() ? "自定义加速源 · 官方 SHA-256 校验（演示）" : "GitHub 官方（演示）" };
+      let selection;
+      try { selection = resolvePackageSelection(cmd.selection, "osx-arm64"); }
+      catch (error) {
+        download = { status: "error", pct: 0, message: error instanceof Error ? error.message : String(error) };
+        sink();
+        return;
+      }
+      const name = runnerPackageName(selection.target, selection.version === "latest" ? "2.340.0" : selection.version);
+      const path = `/Users/kzf/Library/Application Support/gh-runner/packages/${name}`;
+      const compatible = selection.target === "osx-arm64";
+      download = { status: "running", pct: 0, message: `下载 ${name}（演示）`, network: "系统代理 · HTTPS 127.0.0.1:7890 · HTTP 127.0.0.1:7890（演示）", source: cmd.sourceTemplate?.trim() ? "自定义加速源 · 官方 SHA-256 校验（演示）" : "GitHub 官方（演示）" };
       let pct = 0;
       downloadTimer = setInterval(() => {
         if (download?.status !== "running") return;
         pct = Math.min(100, pct + 2);
-        download = { ...download, status: "running", pct, message: "下载 actions-runner-osx-arm64-2.340.0.tar.gz（演示）" };
+        download = { ...download, status: "running", pct, message: `下载 ${name}（演示）` };
         if (pct >= 100) {
           if (downloadTimer) clearInterval(downloadTimer);
           downloadTimer = null;
-          download = { status: "ok", pct: 100, message: "已下载 actions-runner-osx-arm64-2.340.0.tar.gz（演示）" };
-          packages.unshift({ path: "/Users/kzf/Library/Application Support/gh-runner/packages/actions-runner-osx-arm64-2.340.0.tar.gz", name: "actions-runner-osx-arm64-2.340.0.tar.gz", sizeBytes: 221 * 1024 * 1024, mtimeMs: Date.now(), compatible: true });
+          download = { status: "ok", pct: 100, message: `已下载 ${name}（演示）`, packagePath: path };
+          const existing = packages.findIndex((pkg) => pkg.path === path);
+          if (existing >= 0) packages.splice(existing, 1);
+          packages.unshift({ path, name, sizeBytes: 221 * 1024 * 1024, mtimeMs: Date.now(), compatible });
         }
         sink();
       }, 400);

@@ -9,6 +9,7 @@
 
 import { platform, arch, homedir } from "node:os";
 import { join, isAbsolute as nodeIsAbsolute } from "node:path";
+import { recommendedRunnerTarget } from "./runner-package.ts";
 
 export const IS_WIN = platform() === "win32";
 export const PLATFORM = platform();
@@ -22,9 +23,10 @@ export function osSegment(p: NodeJS.Platform = PLATFORM): "osx" | "win" | "linux
 }
 
 /** arch 段：ia32→x86, arm64→arm64, 其余→x64。 */
-export function archSegment(a: string = ARCH): "x86" | "x64" | "arm64" {
+export function archSegment(a: string = ARCH): "x86" | "x64" | "arm64" | "arm" {
   if (a === "ia32") return "x86";
   if (a === "arm64") return "arm64";
+  if (a === "arm") return "arm";
   return "x64";
 }
 
@@ -36,8 +38,8 @@ export function assetNameFor(version: string, p: NodeJS.Platform = PLATFORM, a: 
 
 /** 包文件是否与当前平台匹配（供 UI 把不兼容包置灰）。 */
 export function packageCompatible(fileName: string): boolean {
-  const seg = `${osSegment()}-${archSegment()}`;
-  return fileName.includes(`-${seg}-`);
+  const target = recommendedRunnerTarget(PLATFORM, ARCH);
+  return target != null && new RegExp(`^actions-runner-${target}-\\d+\\.\\d+\\.\\d+\\.${IS_WIN ? "zip" : "tar\\.gz"}$`).test(fileName);
 }
 
 /** runner 启动入口：darwin/linux 用 run.sh；win32 直接跑 Listener.exe（run.cmd 只是它的薄包装）。 */

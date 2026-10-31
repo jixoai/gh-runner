@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerRunner, type ProgressSink } from "../src/register.ts";
+import { assetNameFor, packageCompatible } from "../src/platform.ts";
 
 const exec = promisify(execFile);
 
@@ -44,7 +45,7 @@ beforeEach(async () => {
     ].join("\n"),
   );
   await chmod(join(staging, "config.sh"), 0o755);
-  pkgPath = join(work, "actions-runner-osx-arm64-2.338.1.tar.gz");
+  pkgPath = join(work, assetNameFor("2.338.1"));
   // 官方包形态：内容在归档根部（无顶层目录）
   await exec("tar", ["-czf", pkgPath, "-C", staging, "."]);
   targetDir = join(work, "instance");
@@ -56,6 +57,15 @@ afterEach(async () => {
 });
 
 describe("registerRunner 流水线", () => {
+  it("拒绝跨平台包，不创建实例文件也不启动注册", async () => {
+    const other = ["actions-runner-win-arm64-2.338.2.zip", "actions-runner-osx-arm64-2.338.2.tar.gz"].find((name) => !packageCompatible(name))!;
+    const foreign = join(work, other);
+    await writeFile(foreign, "foreign package");
+    const result = await registerRunner({ dir: targetDir, name: "test", token: "SECRET", labels: "", orgUrl: "https://github.com/acme", workFolder: "/tmp/work", packagePath: foreign }, [], onProgress);
+    expect(result).toMatchObject({ ok: false, error: expect.stringContaining("不兼容当前系统") });
+    expect(await readdir(targetDir)).toEqual([]);
+    expect(lines.join("\n")).not.toContain("SECRET");
+  });
   it("选定包 → 解包 → 注册 → .runner 就位", async () => {
     const result = await registerRunner(
       {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fetchLatestReleaseInfo, releaseChecksum } from "../src/runner-release.ts";
+import { fetchLatestReleaseInfo, fetchReleaseInfo, releaseChecksum } from "../src/runner-release.ts";
 import { assetNameFor } from "../src/platform.ts";
 
 const asset = assetNameFor("2.340.0");
@@ -15,6 +15,52 @@ function page(url = "https://github.com/actions/runner/releases/tag/v2.340.0") {
 }
 
 describe("官方 runner release 探测", () => {
+  it("指定版本与 Windows ARM64 资产，不受运行查询的本机平台影响", async () => {
+    const name = "actions-runner-win-arm64-2.338.2.zip";
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ tag_name: "v2.338.2", assets: [{ name, size: 321, browser_download_url: `https://github.com/actions/runner/releases/download/v2.338.2/${name}`, digest: `sha256:${sha}` }] }));
+    expect(await fetchReleaseInfo({ target: "win-arm64", version: "v2.338.2" }, undefined, request)).toMatchObject({ version: "2.338.2", assetName: name, sha256: sha });
+    expect(request.mock.calls[0]?.[0]).toBe("https://api.github.com/repos/actions/runner/releases/tags/v2.338.2");
+  });
+
+  it("指定版本 API 限流后仍查询原版本官网，不改成最新版", async () => {
+    const name = "actions-runner-linux-arm-2.338.2.tar.gz";
+    const response = new Response(`<li>${name} ${sha}</li>`);
+    Object.defineProperty(response, "url", { value: "https://github.com/actions/runner/releases/tag/v2.338.2" });
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response("limited", { status: 403 })).mockResolvedValueOnce(response);
+    expect(await fetchReleaseInfo({ target: "linux-arm", version: "2.338.2" }, undefined, request)).toMatchObject({ version: "2.338.2", assetName: name, sha256: sha });
+    expect(request.mock.calls[1]?.[0]).toBe("https://github.com/actions/runner/releases/tag/v2.338.2");
+  });
+
+  it("版本不存在时提供可恢复的错误", async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response("missing", { status: 404 }));
+    await expect(fetchReleaseInfo({ target: "linux-x64", version: "2.999.0" }, undefined, request)).rejects.toThrow("找不到发布版本 2.999.0");
+    expect(request).toHaveBeenCalledOnce();
+  });
+
+  it("API 没有所选平台的资产时不会下载本机包替代", async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ tag_name: "v2.340.0", assets: [] }));
+    await expect(fetchReleaseInfo({ target: "win-arm64" }, undefined, request)).rejects.toThrow("没有所选平台的资产");
+  });
+
+  it("官网未确认所选资产时不会拼接可能不存在的下载链接", async () => {
+    const response = new Response("release without asset checksum");
+    Object.defineProperty(response, "url", { value: "https://github.com/actions/runner/releases/tag/v2.340.0" });
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response("limited", { status: 403 })).mockResolvedValueOnce(response);
+    await expect(fetchReleaseInfo({ target: "linux-arm" }, undefined, request)).rejects.toThrow("无法确认所选平台的资产");
+  });
+
+  it("API 与官网均拒绝版本被静默替换", async () => {
+    await expect(fetchReleaseInfo({ target: "osx-arm64", version: "2.338.2" }, undefined, vi.fn<typeof fetch>().mockResolvedValueOnce(api()))).rejects.toThrow("与所选版本不一致");
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response("limited", { status: 403 })).mockResolvedValueOnce(page());
+    await expect(fetchReleaseInfo({ target: "osx-arm64", version: "2.338.2" }, undefined, request)).rejects.toThrow("地址异常");
+  });
+
+  it("非法版本在发起网络请求前被拒绝", async () => {
+    const request = vi.fn<typeof fetch>();
+    await expect(fetchReleaseInfo({ target: "osx-arm64", version: "../latest" }, undefined, request)).rejects.toThrow("版本号格式");
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("API 403 且额度为零时切换官方网页，不需要 Token，不再阻塞下载", async () => {
     const request = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response("limited", { status: 403, headers: { "x-ratelimit-remaining": "0" } })).mockResolvedValueOnce(page());
     const release = await fetchLatestReleaseInfo(undefined, request);

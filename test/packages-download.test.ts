@@ -9,6 +9,7 @@ import { PackageDownload, downloadPackage, packagesDir } from "../src/packages.t
 import { Fleet } from "../src/fleet.ts";
 import { assetNameFor } from "../src/platform.ts";
 import type { DownloadState, ReleaseInfo } from "../src/types.ts";
+import type { RunnerPackageSelection } from "../src/runner-package.ts";
 
 const isolated = vi.hoisted(() => ({ root: "" }));
 vi.mock("../src/config.ts", async (original) => ({
@@ -91,8 +92,8 @@ afterEach(async () => {
   await rm(isolated.root, { recursive: true, force: true });
 });
 
-function start(sourceTemplate = "") {
-  const job = new PackageDownload((state) => states.push(state), sourceTemplate);
+function start(sourceTemplate = "", selection?: RunnerPackageSelection) {
+  const job = new PackageDownload((state) => states.push(state), sourceTemplate, selection);
   jobs.push(job);
   const done = job.run();
   pending.push(done);
@@ -104,6 +105,23 @@ async function progressed() {
 }
 
 describe("runner 分发包下载控制", () => {
+  it("指定其他平台和版本后暂停续传，仍下载同一资产并发布完成路径", async () => {
+    release = { ...release, version: "2.338.2", tag: "v2.338.2", assetName: "actions-runner-win-arm64-2.338.2.zip", sha256: createHash("sha256").update(content).digest("hex") };
+    const { job, done } = start("https://mirror.test/v{version}/{asset}", { target: "win-arm64", version: "v2.338.2" });
+    await progressed();
+    job.pause();
+    await vi.waitFor(() => expect(sessions.size).toBe(0));
+    job.resume();
+    const path = await done;
+    expect(path).toBe(join(packagesDir(), release.assetName));
+    expect(states.at(-1)).toMatchObject({ status: "ok", packagePath: path });
+    expect(mirrors.every((mirror) => mirror.url === `https://mirror.test/v2.338.2/${release.assetName}`)).toBe(true);
+    expect(await readFile(path!)).toEqual(content);
+    const apiCalls = vi.mocked(fetch).mock.calls.filter(([input]) => String(input).includes("api.github.com"));
+    expect(apiCalls).toHaveLength(1);
+    expect(apiCalls[0]?.[0]).toBe("https://api.github.com/repos/actions/runner/releases/tags/v2.338.2");
+  });
+
   it("只有大包经过加速源，支持暂停续传，并校验官方哈希", async () => {
     release.sha256 = createHash("sha256").update(content).digest("hex");
     const { job, done } = start("https://mirror.test/v{version}/{asset}");

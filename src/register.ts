@@ -21,6 +21,7 @@ import {
   defaultLabels,
   basenameOf,
   isAbsolutePath,
+  packageCompatible,
 } from "./platform.ts";
 
 export interface RegisterRequest {
@@ -96,7 +97,7 @@ export async function findTarball(searchDirs: string[]): Promise<string | null> 
       try {
         const names = await readdir(dir);
         const hit = names
-          .filter((n) => /^actions-runner-(osx|win|linux)-(x86|x64|arm64)-.*\.(tar\.gz|zip)$/.test(n))
+          .filter((name) => packageCompatible(name))
           .sort()
           .at(-1);
         if (hit) return join(dir, hit);
@@ -120,6 +121,7 @@ export async function validateNewRunner(req: RegisterRequest, searchDirs: string
   }
   const pkg = req.packagePath?.trim() || await findTarball(searchDirs);
   if (!pkg || !existsSync(pkg)) throw new Error("未选定分发包：请下载最新版或导入本地包");
+  if (!packageCompatible(basenameOf(pkg))) throw new Error("所选分发包不兼容当前系统或 CPU 架构，请选择本机适配包");
   return pkg;
 }
 

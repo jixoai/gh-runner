@@ -15,9 +15,10 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { configDir } from "./config.ts";
-import { packageCompatible } from "./platform.ts";
+import { ARCH, PLATFORM, packageCompatible } from "./platform.ts";
 import { createPackageTransport, type PackageTransport } from "./package-network.ts";
-import { fetchLatestReleaseInfo } from "./runner-release.ts";
+import { fetchReleaseInfo } from "./runner-release.ts";
+import { recommendedRunnerTarget, resolvePackageSelection, type RunnerPackageSelection } from "./runner-package.ts";
 import { checkedMirrorRequest, downloadTemplateError, packageDownloadUrl } from "./download-source.ts";
 import type { DownloadState, PackageInfo, ReleaseInfo } from "./types.ts";
 
@@ -29,7 +30,7 @@ export function packagesDir(): string {
   return join(configDir(), "packages");
 }
 
-const PKG_RE = /^actions-runner-(osx|win|linux)-(x86|x64|arm64)-\d+\.\d+\.\d+\.(tar\.gz|zip)$/;
+const PKG_RE = /^actions-runner-(osx|win|linux)-(x86|x64|arm64|arm)-\d+\.\d+\.\d+\.(tar\.gz|zip)$/;
 
 function toInfo(path: string, st: { size: number; mtimeMs: number }): PackageInfo {
   const name = path.split(/[\\/]+/).pop() ?? path;
@@ -176,7 +177,7 @@ export async function downloadPackage(
 }
 
 export class PackageDownload {
-  #state: DownloadState = { status: "running", pct: 0, message: "查询最新 release…" };
+  #state: DownloadState = { status: "running", pct: 0, message: "准备下载分发包…" };
   #controller: AbortController | null = null;
   #paused = false;
   #cancelled = false;
@@ -185,10 +186,10 @@ export class PackageDownload {
   #network: string | undefined;
   #source = "GitHub 官方";
 
-  constructor(private readonly onState: (state: DownloadState) => void, private readonly sourceTemplate = "") {}
+  constructor(private readonly onState: (state: DownloadState) => void, private readonly sourceTemplate = "", private readonly selection: RunnerPackageSelection = {}) {}
 
-  #publish(status: DownloadState["status"], message: string, pct = this.#state.pct): void {
-    this.#state = { status, message, pct, network: this.#network, source: this.#source };
+  #publish(status: DownloadState["status"], message: string, pct = this.#state.pct, packagePath?: string): void {
+    this.#state = { status, message, pct, network: this.#network, source: this.#source, packagePath };
     this.onState(this.#state);
   }
 
@@ -220,6 +221,7 @@ export class PackageDownload {
     const checkpoint: DownloadCheckpoint = {};
     this.onState(this.#state);
     try {
+      const selection = resolvePackageSelection(this.selection, recommendedRunnerTarget(PLATFORM, ARCH));
       const problem = downloadTemplateError(this.sourceTemplate);
       if (problem) throw new Error(problem);
       while (!this.#cancelled) {
@@ -233,8 +235,8 @@ export class PackageDownload {
             transport = await createPackageTransport(controller.signal);
             this.#network = transport.description;
           }
-          this.#publish("running", release ? "正在继续下载…" : "查询最新 release…");
-          release ??= await fetchLatestReleaseInfo(controller.signal, transport.fetch);
+          this.#publish("running", release ? "正在继续下载…" : `查询${selection.version === "latest" ? "最新版本" : `版本 ${selection.version}`} · ${selection.target}…`);
+          release ??= await fetchReleaseInfo(selection, controller.signal, transport.fetch);
           controller.signal.throwIfAborted();
           const mirror = Boolean(this.sourceTemplate.trim());
           if (mirror && !release.sha256) throw new Error("无法获取 GitHub 官方 SHA-256，不能安全使用加速源；请选择官方下载或导入已有包");
@@ -246,7 +248,7 @@ export class PackageDownload {
             if (!this.#paused && !this.#cancelled) this.#publish("running", description, pct);
           }, controller.signal, checkpoint, mirror ? checkedMirrorRequest(transport.fetch) : transport.fetch);
           this.#settled = true;
-          this.#publish("ok", `已下载 ${dest}`, 100);
+          this.#publish("ok", `已下载 ${dest}`, 100, dest);
           return dest;
         } catch (error) {
           if (controller.signal.aborted) continue;

@@ -439,7 +439,7 @@ export class UiHost {
         break;
       }
       case "download-latest": {
-        void this.fleet.downloadLatest(cmd.sourceTemplate);
+        void this.fleet.downloadLatest(cmd.sourceTemplate, cmd.selection);
         break;
       }
       case "pause-download": {

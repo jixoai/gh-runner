@@ -40,6 +40,7 @@ import {
   type DownloadState,
 } from "./packages.ts";
 import { ARCH, PLATFORM, isAbsolutePath, registerSpawn } from "./platform.ts";
+import type { RunnerPackageSelection } from "./runner-package.ts";
 import type {
   CurrentJob,
   FleetTask,
@@ -208,13 +209,13 @@ export class Fleet {
   }
 
   /** 下载 actions/runner 最新平台的包（进度写入 snapshot.download，完成后刷新清单）。 */
-  downloadLatest(sourceTemplate = ""): Promise<void> {
+  downloadLatest(sourceTemplate = "", selection?: RunnerPackageSelection): Promise<void> {
     if (this.#downloadPromise) return this.#downloadPromise;
     if (this.#downloadClearTimer) clearTimeout(this.#downloadClearTimer);
     const job = new PackageDownload((state) => {
       this.#download = state;
       this.#emitSoon();
-    }, sourceTemplate);
+    }, sourceTemplate, selection);
     this.#downloadJob = job;
     this.#downloadPromise = (async () => {
       try {

@@ -7,6 +7,8 @@
  * 2. 不含任何 IO / 副作用，供前后端（宿主与页面）共同引用。
  */
 
+import type { RunnerPackageSelection } from "./runner-package.ts";
+
 /** 实例进程生命周期（supervisor 视角）。external 表示进程在跑但不是本工具拉起的。 */
 export type ProcessState = "stopped" | "starting" | "running" | "stopping";
 
@@ -81,6 +83,7 @@ export interface DownloadState {
   message: string;
   network?: string;
   source?: string;
+  packagePath?: string;
 }
 
 export interface ReleaseInfo {
@@ -193,7 +196,7 @@ export type UiCommand =
   | { type: "open-work-dir"; id: string }
   | ({ type: "runner-operation" } & RunnerOperationRequest)
   | { type: "open-url"; url: string }
-  | { type: "download-latest"; sourceTemplate?: string }
+  | { type: "download-latest"; sourceTemplate?: string; selection?: RunnerPackageSelection }
   | { type: "pause-download" }
   | { type: "resume-download" }
   | { type: "cancel-download" }
