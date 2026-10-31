@@ -29,6 +29,7 @@ const content = Buffer.alloc(256 * 1024, "runner archive");
 const sessions = new Set<ServerResponse>();
 
 beforeEach(async () => {
+  vi.stubEnv("GH_RUNNER_PROXY", "direct");
   isolated.root = await mkdtemp(join(tmpdir(), "runner-download-"));
   states = []; jobs = []; pending = []; ranges = [];
   ignoreRange = false; invalidRange = false; hangMetadata = false; hangHeaders = false; truncate = false;
@@ -79,6 +80,7 @@ afterEach(async () => {
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   await rm(isolated.root, { recursive: true, force: true });
 });
 

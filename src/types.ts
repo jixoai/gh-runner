@@ -79,6 +79,7 @@ export interface DownloadState {
   /** 0-100。 */
   pct: number;
   message: string;
+  network?: string;
 }
 
 export interface ReleaseInfo {

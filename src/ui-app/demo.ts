@@ -275,12 +275,12 @@ export const demoHost = {
     }
     if (cmd.type === "download-latest") {
       if (download && ["running", "paused", "cancelling"].includes(download.status)) return;
-      download = { status: "running", pct: 0, message: "下载 actions-runner-osx-arm64-2.340.0.tar.gz（演示）" };
+      download = { status: "running", pct: 0, message: "下载 actions-runner-osx-arm64-2.340.0.tar.gz（演示）", network: "系统代理 · HTTPS 127.0.0.1:7890 · HTTP 127.0.0.1:7890（演示）" };
       let pct = 0;
       downloadTimer = setInterval(() => {
         if (download?.status !== "running") return;
         pct = Math.min(100, pct + 2);
-        download = { status: "running", pct, message: "下载 actions-runner-osx-arm64-2.340.0.tar.gz（演示）" };
+        download = { ...download, status: "running", pct, message: "下载 actions-runner-osx-arm64-2.340.0.tar.gz（演示）" };
         if (pct >= 100) {
           if (downloadTimer) clearInterval(downloadTimer);
           downloadTimer = null;

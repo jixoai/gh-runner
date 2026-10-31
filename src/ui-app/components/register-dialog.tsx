@@ -157,6 +157,7 @@ export function RegisterDialog({ open, onOpenChange, summary }: {
                 {download && <div className="mt-3 space-y-2">
                   {downloading && <Progress value={download.pct} aria-label="分发包下载进度" />}
                   <p role="status" className={`break-words text-xs ${download.status === "error" ? "text-bad" : "text-muted-foreground"}`}>{downloading ? `${download.pct}% · ` : ""}{download.message}</p>
+                  {download.network && <p className="break-words text-xs text-muted-foreground">连接：{download.network}</p>}
                   {downloading && <div className="flex flex-wrap gap-2">
                     {download.status === "running" && <Button variant="outline" size="sm" onClick={() => store.send({ type: "pause-download" })}><Pause className="size-4" />暂停下载</Button>}
                     {download.status === "paused" && <Button variant="outline" size="sm" onClick={() => store.send({ type: "resume-download" })}><Play className="size-4" />继续下载</Button>}

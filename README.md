@@ -12,6 +12,27 @@
 npx @jixoai/gh-runner          # 或：pnpm dlx @jixoai/gh-runner / npm i -g @jixoai/gh-runner && gh-runner
 ```
 
+### 分发包下载与代理
+
+查询最新版、下载包以及 GitHub 资产重定向共用同一套代理设置，不需要额外开启 Node 的代理参数。
+每次开始下载时重新读取，优先级为：`GH_RUNNER_PROXY` → 环境变量 → macOS / Windows 系统静态代理 → 直连。
+下载进度下会显示连接方式和代理主机/端口，不显示代理用户名或密码。
+
+- 环境变量支持 `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY`、`NO_PROXY` 及对应小写形式；小写优先。
+  HTTPS 未单独配置时回退到 HTTP 代理；`ALL_PROXY` 作为缺省代理。`NO_PROXY` 支持域名、端口、通配符和 IP/CIDR。
+- macOS 自动读取网络设置中的 HTTP / HTTPS 代理及绕过规则；Windows 读取当前用户 Internet Settings 的静态代理。
+  Linux 请使用环境变量。PAC / WPAD、仅 SOCKS 代理不会被静默忽略，请改用代理客户端的 HTTP / 混合端口。
+- 可用 `GH_RUNNER_PROXY=http://127.0.0.1:7890` 显式指定，或 `GH_RUNNER_PROXY=direct` 明确禁用下载代理。
+  代理连接失败会报错，不会偷偷改为直连；修正设置后点击重新下载。
+
+```bash
+HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890 pnpm start
+```
+
+以上设置仅控制本工具的分发包请求，不会修改系统代理或已启动 runner 的网络设置。
+
+### 管理实例
+
 启动后菜单栏出现 `▶N` 图标（N=在跑数，作业中带 `↻M`），控制面板窗口自动打开。
 
 - **自动发现**：扫描配置的 `searchDirs`（默认 macOS `/Volumes/bnqkl/Users/kzf`；Windows

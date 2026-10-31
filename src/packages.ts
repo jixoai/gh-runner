@@ -15,6 +15,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { configDir } from "./config.ts";
 import { assetNameFor, packageCompatible } from "./platform.ts";
+import { createPackageTransport, type PackageTransport } from "./package-network.ts";
 import type { DownloadState, PackageInfo, ReleaseInfo } from "./types.ts";
 
 export type { DownloadState, PackageInfo, ReleaseInfo };
@@ -59,12 +60,15 @@ export async function listPackages(importedPaths: string[]): Promise<PackageInfo
 }
 
 /** 查询 actions/runner 最新 release 中匹配当前平台的资产。 */
-export async function fetchLatestReleaseInfo(signal?: AbortSignal): Promise<ReleaseInfo> {
-  const res = await fetch("https://api.github.com/repos/actions/runner/releases/latest", {
+export async function fetchLatestReleaseInfo(signal?: AbortSignal, request = fetch): Promise<ReleaseInfo> {
+  const res = await request("https://api.github.com/repos/actions/runner/releases/latest", {
     signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(30_000)]),
     headers: { "User-Agent": "jixoai-gh-runner", Accept: "application/vnd.github+json" },
   });
-  if (!res.ok) throw new Error(`GitHub API ${res.status}（查询最新 release 失败）`);
+  if (!res.ok) {
+    await res.body?.cancel();
+    throw new Error(`GitHub API ${res.status}（查询最新 release 失败）`);
+  }
   const body = (await res.json()) as {
     tag_name?: string;
     assets?: { name: string; browser_download_url: string; size: number }[];
@@ -89,6 +93,7 @@ export async function downloadPackage(
   onProgress: (pct: number, downloadedBytes: number, totalBytes: number) => void,
   signal?: AbortSignal,
   checkpoint?: DownloadCheckpoint,
+  request = fetch,
 ): Promise<string> {
   signal?.throwIfAborted();
   await mkdir(packagesDir(), { recursive: true });
@@ -111,7 +116,7 @@ export async function downloadPackage(
       headers.Range = `bytes=${offset}-`;
       headers["If-Range"] = checkpoint!.validator!;
     }
-    const res = await fetch(release.url, { headers, redirect: "follow", signal: requestSignal });
+    const res = await request(release.url, { headers, redirect: "follow", signal: requestSignal });
     if (!res.ok || !res.body) {
       await res.body?.cancel();
       throw new Error(`下载失败：HTTP ${res.status}`);
@@ -168,11 +173,12 @@ export class PackageDownload {
   #cancelled = false;
   #settled = false;
   #wake: (() => void) | null = null;
+  #network: string | undefined;
 
   constructor(private readonly onState: (state: DownloadState) => void) {}
 
   #publish(status: DownloadState["status"], message: string, pct = this.#state.pct): void {
-    this.#state = { status, message, pct };
+    this.#state = { status, message, pct, network: this.#network };
     this.onState(this.#state);
   }
 
@@ -200,6 +206,7 @@ export class PackageDownload {
 
   async run(): Promise<string | null> {
     let release: ReleaseInfo | undefined;
+    let transport: PackageTransport | undefined;
     const checkpoint: DownloadCheckpoint = {};
     this.onState(this.#state);
     try {
@@ -210,12 +217,17 @@ export class PackageDownload {
         const controller = new AbortController();
         this.#controller = controller;
         try {
-          release ??= await fetchLatestReleaseInfo(controller.signal);
+          if (!transport) {
+            transport = await createPackageTransport(controller.signal);
+            this.#network = transport.description;
+          }
+          this.#publish("running", release ? "正在继续下载…" : "查询最新 release…");
+          release ??= await fetchLatestReleaseInfo(controller.signal, transport.fetch);
           controller.signal.throwIfAborted();
           this.#publish("running", `下载 ${release.assetName}`);
           const dest = await downloadPackage(release, (pct) => {
             if (!this.#paused && !this.#cancelled) this.#publish("running", `下载 ${release!.assetName}`, pct);
-          }, controller.signal, checkpoint);
+          }, controller.signal, checkpoint, transport.fetch);
           this.#settled = true;
           this.#publish("ok", `已下载 ${dest}`, 100);
           return dest;
@@ -231,6 +243,8 @@ export class PackageDownload {
     } finally {
       this.#settled = true;
       this.#controller = null;
+      try { await transport?.close(); }
+      catch { this.#publish("error", "下载连接清理失败，请退出应用后重试"); }
       if (release) {
         try { await rm(join(packagesDir(), `${release.assetName}.part`), { force: true }); }
         catch { this.#publish("error", "无法清理未完成的下载文件，请检查缓存目录权限"); }
