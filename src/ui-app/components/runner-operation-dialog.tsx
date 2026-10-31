@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DeviceAuthorization } from "@/components/register-dialog";
 import { store, type InstanceView, type SummaryPush } from "@/lib/host";
+import { createRequestId } from "@/lib/request-id";
 
 export function RunnerOperationDialog({ inst, summary, onClose }: { inst: InstanceView; summary: SummaryPush | null; onClose: () => void }) {
   const action = inst.unregistered ? "reregister" : "unregister";
@@ -14,6 +15,7 @@ export function RunnerOperationDialog({ inst, summary, onClose }: { inst: Instan
   const [deleteLocalFiles, setDeleteLocalFiles] = useState(false);
   const [confirming, setConfirming] = useState(removing);
   const [requestId, setRequestId] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const submitting = useRef(false);
   const operation = summary?.runnerOperation?.requestId === requestId ? summary.runnerOperation : null;
   const busy = requestId !== null && (!operation || operation.status === "running");
@@ -29,11 +31,18 @@ export function RunnerOperationDialog({ inst, summary, onClose }: { inst: Instan
   }, [operation?.status]);
   const submit = () => {
     if (submitting.current || blocked || confirming) return;
+    const nextId = createRequestId();
     submitting.current = true;
-    const nextId = crypto.randomUUID();
-    setRequestId(nextId);
-    store.send({ type: "runner-operation", requestId: nextId, id: inst.id, action, method, token: token.trim(), deleteLocalFiles: removing && deleteLocalFiles });
-    setToken("");
+    setSubmitError(null);
+    try {
+      store.send({ type: "runner-operation", requestId: nextId, id: inst.id, action, method, token: token.trim(), deleteLocalFiles: removing && deleteLocalFiles });
+      setRequestId(nextId);
+    } catch {
+      submitting.current = false;
+      setSubmitError("请求未能发送到应用，请重试；若仍失败，请退出并重新启动应用。");
+    } finally {
+      setToken("");
+    }
   };
   return <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
     <DialogContent showCloseButton={!busy} onEscapeKeyDown={(event) => { if (busy) event.preventDefault(); }} onInteractOutside={(event) => { if (busy) event.preventDefault(); }} className="flex max-h-[calc(100dvh-24px)] flex-col overflow-hidden sm:max-w-[520px]">
@@ -67,6 +76,7 @@ export function RunnerOperationDialog({ inst, summary, onClose }: { inst: Instan
         : <p role="status" className="flex items-center gap-2 text-sm"><LoaderCircle className="size-4 animate-spin" />{authorization?.message || operation?.message || "正在开始…"}</p>)}
       {busy && waiting && store.demo && <Button variant="secondary" onClick={() => void import("../demo").then(({ demoHost }) => demoHost.authorize())}>模拟手机已确认（演示）</Button>}
       {operation && operation.status !== "running" && <p role={operation.status === "error" ? "alert" : "status"} className={`text-sm ${operation.status === "error" ? "text-bad" : "text-muted-foreground"}`}>{operation.message}</p>}
+      {submitError && <p role="alert" className="text-sm text-bad">{submitError}</p>}
       {finished && !(removing && deleteLocalFiles) && <p className="text-xs text-muted-foreground">可打开目录手动删除不需要的工作文件。保留安装文件和目录结构，才能直接重新注册。</p>}
       </div>
       <div className="flex flex-none flex-wrap items-center justify-end gap-2 border-t border-border pt-4">
