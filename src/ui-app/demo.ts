@@ -155,7 +155,9 @@ export const demoHost = {
         inst.autoStart = false;
         inst.agentId = inst.configured ? 5001 : null;
         runnerOperation.status = "ok";
-        runnerOperation.message = inst.configured ? "已重新注册，文件保持不变（演示）" : "已从 GitHub 注销，工作文件已保留（演示）";
+        const cleanup = command.action === "unregister" && command.deleteLocalFiles === true;
+        if (cleanup) instances.splice(instances.indexOf(inst), 1);
+        runnerOperation.message = inst.configured ? "已重新注册，文件保持不变（演示）" : cleanup ? "已从 GitHub 注销并清理实例文件（演示）" : "已从 GitHub 注销，工作文件已保留（演示）";
         authorization = { status: "cleared", message: "临时凭据已清理（演示）" };
         task.status = "ok";
         task.message = runnerOperation.message;

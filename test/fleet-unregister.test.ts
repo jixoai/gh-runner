@@ -16,6 +16,10 @@ vi.mock("../src/github-auth.ts", () => ({ githubClientId: () => "Iv1.test", auth
 vi.mock("../src/register.ts", () => ({ registerRunner: vi.fn(), unregisterRunner: vi.fn(), validateNewRunner: vi.fn() }));
 vi.mock("../src/discover.ts", async (original) => ({ ...await original<typeof import("../src/discover.ts")>(), findListenerProcesses: vi.fn(async () => new Map()) }));
 vi.mock("../src/tailer.ts", () => ({ DirTail: class { start(onLines: (lines: string[]) => void) { tail.onLines = onLines; } stop() {} } }));
+vi.mock("node:fs/promises", async (original) => {
+  const actual = await original<typeof import("node:fs/promises")>();
+  return { ...actual, rm: vi.fn(actual.rm) };
+});
 
 let fleet: Fleet;
 let dir: string;
@@ -85,10 +89,10 @@ describe("注销及原目录复用", () => {
     expect(fleet.snapshot().runnerOperation?.message).toContain("配置发生变化");
   });
 
-  it("注销后保留实例、工作目录和重注册信息，禁用自启，快照不包含凭据", async () => {
+  it.each([undefined, false])("未选择清理时（%s）仍注销并保留文件、重注册信息，禁用自启且不泄露凭据", async (deleteLocalFiles) => {
     const snapshots: string[] = [];
     fleet.onSnapshot((snapshot) => snapshots.push(JSON.stringify(snapshot)));
-    await fleet.operateRunner(input());
+    await fleet.operateRunner({ ...input(), deleteLocalFiles });
     expect(vi.mocked(authorizeRunners).mock.calls[0]![0]).toMatchObject({ purpose: "remove", count: 1, targetUrl: metadata.gitHubUrl });
     expect(unregisterRunner).toHaveBeenCalledWith(dir, "REMOVE_SECRET", expect.any(Function));
     expect(fleet.view(instanceIdOf(dir))).toMatchObject({ configured: false, unregistered: true, autoStart: false, name: "test-runner" });
@@ -96,6 +100,73 @@ describe("注销及原目录复用", () => {
     expect(fleet.snapshot().runnerOperation).toMatchObject({ status: "ok", action: "unregister" });
     expect(snapshots.join("\n")).not.toContain("REMOVE_SECRET");
     expect(await readFile(join(dir, "_work", "keep.txt"), "utf8")).toBe("WORK");
+  });
+
+  it("勾选清理后先注销再删除实例目录，并移除持久化记录", async () => {
+    vi.mocked(unregisterRunner).mockImplementationOnce(async () => {
+      expect(await readFile(join(dir, "_work", "keep.txt"), "utf8")).toBe("WORK");
+      await rm(join(dir, ".runner"));
+    });
+    await fleet.operateRunner({ ...input(), deleteLocalFiles: true });
+    expect(unregisterRunner).toHaveBeenCalledOnce();
+    expect(fleet.snapshot().runnerOperation).toMatchObject({ status: "ok", message: expect.stringContaining("删除本地实例目录") });
+    await expect(realpath(dir)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(fleet.view(instanceIdOf(dir))).toBeNull();
+    expect(config.instances).toEqual([]);
+    await fleet.destroy();
+    fleet = new Fleet();
+    await fleet.boot({ autoStart: false });
+    expect(fleet.snapshot().instances).toEqual([]);
+  });
+
+  it("注销失败时即使勾选清理，也保留本地文件和注册记录", async () => {
+    vi.mocked(unregisterRunner).mockRejectedValueOnce(new Error("GitHub 请求失败"));
+    await fleet.operateRunner({ ...input(), deleteLocalFiles: true });
+    expect(fleet.snapshot().runnerOperation?.status).toBe("error");
+    expect(await readFile(join(dir, "_work", "keep.txt"), "utf8")).toBe("WORK");
+    expect(fleet.view(instanceIdOf(dir))?.configured).toBe(true);
+    expect(config.instances).toHaveLength(1);
+  });
+
+  it("注销成功但清理失败时准确提示，不宣称 GitHub 注销失败", async () => {
+    vi.mocked(unregisterRunner).mockImplementationOnce(async () => {
+      await rm(join(dir, ".runner"));
+      vi.mocked(rm).mockRejectedValueOnce(new Error("文件被占用"));
+    });
+    await fleet.operateRunner({ ...input(), deleteLocalFiles: true });
+    expect(fleet.snapshot().runnerOperation).toMatchObject({ status: "error", message: expect.stringContaining("GitHub 已注销") });
+    expect(fleet.snapshot().runnerOperation?.message).toContain("无需再次注销");
+    expect(fleet.view(instanceIdOf(dir))).toMatchObject({ configured: false, unregistered: true });
+    expect(await readFile(join(dir, "_work", "keep.txt"), "utf8")).toBe("WORK");
+  });
+
+  it("不会递归删除实例目录外的工作文件", async () => {
+    const externalWork = await mkdtemp(join(tmpdir(), "rf-external-work-"));
+    try {
+      await writeFile(join(externalWork, "keep.txt"), "EXTERNAL");
+      await writeFile(join(dir, ".runner"), JSON.stringify({ ...metadata, workFolder: externalWork }));
+      await fleet.destroy();
+      fleet = new Fleet();
+      await fleet.boot({ autoStart: false });
+      await fleet.operateRunner({ ...input(), deleteLocalFiles: true });
+      expect(fleet.snapshot().runnerOperation?.status).toBe("ok");
+      expect(await readFile(join(externalWork, "keep.txt"), "utf8")).toBe("EXTERNAL");
+    } finally { await rm(externalWork, { recursive: true, force: true }); }
+  });
+
+  it("实例目录包含其他实例时拒绝自动清理，不申请授权", async () => {
+    const nested = join(dir, "another-runner");
+    await mkdir(nested);
+    await writeFile(join(nested, ".runner"), JSON.stringify({ ...metadata, agentId: 99 }));
+    config.instances.push({ id: instanceIdOf(nested), dir: nested, autoStart: false });
+    await fleet.destroy();
+    fleet = new Fleet();
+    await fleet.boot({ autoStart: false });
+    await fleet.operateRunner({ ...input(), deleteLocalFiles: true });
+    expect(authorizeRunners).not.toHaveBeenCalled();
+    expect(unregisterRunner).not.toHaveBeenCalled();
+    expect(fleet.snapshot().runnerOperation?.message).toContain("不能自动清理");
+    expect(await readFile(join(nested, ".runner"), "utf8")).toContain("99");
   });
 
   it("重启管理器后仍可打开原工作目录、重新授权注册，注册完保持停止", async () => {

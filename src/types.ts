@@ -126,6 +126,7 @@ export interface RunnerOperationRequest {
   action: "unregister" | "reregister";
   method: "github" | "token";
   token: string;
+  deleteLocalFiles?: boolean;
 }
 
 export interface RunnerOperationState {

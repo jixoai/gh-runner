@@ -9,10 +9,10 @@
  * 4. 快照发射：变更去抖后全量推送（seq 单调递增）。
  */
 
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir, hostname } from "node:os";
 import { existsSync } from "node:fs";
-import { realpath } from "node:fs/promises";
+import { realpath, rm } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { DirTail } from "./tailer.ts";
 import { normalizeLine, parseConsoleLine, stripDiagPrefix } from "./logparse.ts";
@@ -30,7 +30,7 @@ import {
   stopProcessGroup,
   type SpawnedRunner,
 } from "./supervisor.ts";
-import { loadConfig, saveConfig, upsertInstance } from "./config.ts";
+import { configDir, loadConfig, saveConfig, upsertInstance } from "./config.ts";
 import { registerRunner, unregisterRunner, validateNewRunner, type RegisterRequest } from "./register.ts";
 import { authorizeRunners, githubClientId } from "./github-auth.ts";
 import { parseRunnerTarget } from "./github-target.ts";
@@ -584,6 +584,16 @@ export class Fleet {
       if (!existsSync(entryPath)) throw new Error("安装文件已缺失，请重新下载分发包并添加实例；工作文件可继续保留");
       const target = parseRunnerTarget(rt.meta.gitHubUrl ?? "");
       const originalDir = await realpath(rt.dir);
+      if (removing && input.deleteLocalFiles === true) {
+        const protectedDirs = [homedir(), process.cwd(), configDir(), ...[...this.#rts.values()].filter((item) => item.id !== rt.id).map((item) => item.dir)];
+        for (const path of protectedDirs) {
+          const canonical = await realpath(path).catch(() => resolve(path));
+          const nested = relative(originalDir, canonical);
+          if (nested === "" || (!isAbsolute(nested) && nested !== ".." && !nested.startsWith(`..${PLATFORM === "win32" ? "\\" : "/"}`))) {
+            throw new Error("实例目录包含用户目录、应用目录或其他实例，不能自动清理；请取消勾选后注销并手动检查文件");
+          }
+        }
+      }
       const originalAgentId = rt.meta.agentId;
       const workFolder = rt.meta.workFolder ? resolve(rt.dir, rt.meta.workFolder) : "";
       if (!workFolder) throw new Error("实例缺少工作目录配置，请先检查 .runner");
@@ -650,13 +660,26 @@ export class Fleet {
         this.#config = upsertInstance(this.#config, { id: rt.id, dir: rt.dir, autoStart: false });
       }
       await saveConfig(this.#config);
+      if (removing && input.deleteLocalFiles === true) {
+        progress("GitHub 已注销，正在清理本地实例文件…");
+        if (await realpath(rt.dir) !== originalDir || (await readRunnerMeta(rt.dir)).configured) {
+          throw new Error("实例目录或注册配置发生变化，已取消文件清理，请手动检查");
+        }
+        rt.tail?.stop();
+        await rm(rt.dir, { recursive: true });
+        this.#rts.delete(rt.id);
+        this.#config = { ...this.#config, instances: this.#config.instances.filter((item) => item.id !== rt.id) };
+        await saveConfig(this.#config);
+      }
       this.#runnerOperation.status = "ok";
-      this.#runnerOperation.message = removing ? "已从 GitHub 注销；本地安装包、工作文件和日志已保留" : "已重新注册；工作文件保持不变，可点击启动";
+      this.#runnerOperation.message = removing
+        ? input.deleteLocalFiles === true ? "已从 GitHub 注销并删除本地实例目录；目录外的工作文件不受影响" : "已从 GitHub 注销；本地安装包、工作文件和日志已保留"
+        : "已重新注册；工作文件保持不变，可点击启动";
       this.#task = { kind: input.action, status: "ok", message: this.#runnerOperation.message };
       this.#authorization = { status: "cleared", message: "本次临时凭据已清理" };
     } catch (error) {
       const message = controller.signal.aborted ? "授权已取消，未执行注销或重新注册" : error instanceof Error ? error.message : String(error);
-      const detail = removed ? `GitHub 已注销，但保存本机记录失败：${message}` : message;
+      const detail = removed ? `GitHub 已注销，但本地清理或记录保存未完成：${message}。请打开目录检查剩余文件，无需再次注销` : message;
       this.#runnerOperation.status = "error";
       this.#runnerOperation.message = detail;
       this.#task = { kind: input.action, status: "error", message: detail };
