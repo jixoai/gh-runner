@@ -3,7 +3,7 @@
  * 以 mock-runner fixture 模拟 Runner.Listener（stdout + _diag 双写，TERM 优雅退出）。
  * HOME 指向临时目录，隔离真实用户配置。
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, mkdir, writeFile, copyFile, rm } from "node:fs/promises";
 import { chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -82,6 +82,66 @@ afterEach(async () => {
 });
 
 describe("Fleet E2E", () => {
+  it.each([true, false])("shell 包装器返回 143 时按是否主动停止分类（主动停止：%s）", async (requestedStop) => {
+    await writeFile(join(instanceDir, "run.sh"), "#!/bin/bash\ntrap 'exit 143' TERM\necho 'runner ready'\nwhile true; do sleep 1; done\n");
+    fleet = new fleetModule.Fleet();
+    await fleet.boot({ autoStart: false });
+    const errors: string[] = [];
+    const unsubscribe = fleet.onSnapshot((snapshot) => {
+      const error = snapshot.instances.find((instance) => instance.id === "actions-runner-e2e")?.lastError;
+      if (error) errors.push(error);
+    });
+    try {
+      await fleet.start("actions-runner-e2e");
+      await waitFor(() => fleet!.view("actions-runner-e2e")?.processState === "running" ? true : null, "runner 启动");
+      const pid = fleet.view("actions-runner-e2e")!.pid!;
+      if (requestedStop) await fleet.stop("actions-runner-e2e");
+      else process.kill(-pid, "SIGTERM");
+      await waitFor(() => fleet!.view("actions-runner-e2e")?.processState === "stopped" ? true : null, "runner 停止");
+      const view = fleet.view("actions-runner-e2e")!;
+      expect(view.pid).toBeNull();
+      expect(view.currentJob).toBeNull();
+      if (requestedStop) {
+        expect(view.lastError).toBeNull();
+        expect(errors).toEqual([]);
+      } else {
+        expect(view.lastError).toContain("code=143 signal=none");
+      }
+    } finally {
+      unsubscribe();
+      await fleet.stop("actions-runner-e2e");
+    }
+  });
+
+  it("没有发起停止时，真正的非零退出仍显示错误", async () => {
+    await writeFile(join(instanceDir, "run.sh"), "#!/bin/bash\necho 'runner failed'\nexit 1\n");
+    fleet = new fleetModule.Fleet();
+    await fleet.boot({ autoStart: false });
+    await fleet.start("actions-runner-e2e");
+    await waitFor(() => fleet!.view("actions-runner-e2e")?.lastError ? true : null, "异常退出被记录");
+    expect(fleet.view("actions-runner-e2e")).toMatchObject({ processState: "stopped", pid: null, lastError: expect.stringContaining("code=1 signal=none") });
+  });
+
+  it("停止失败保留错误与进程句柄，允许再次停止", async () => {
+    await writeFile(join(instanceDir, "run.sh"), "#!/bin/bash\ntrap 'exit 143' TERM\necho 'runner ready'\nwhile true; do sleep 1; done\n");
+    fleet = new fleetModule.Fleet();
+    await fleet.boot({ autoStart: false });
+    await fleet.start("actions-runner-e2e");
+    await waitFor(() => fleet!.view("actions-runner-e2e")?.processState === "running" ? true : null, "runner 启动");
+    const pid = fleet.view("actions-runner-e2e")!.pid;
+    const supervisor = await import("../src/supervisor.ts");
+    const stop = vi.spyOn(supervisor, "stopProcessGroup").mockResolvedValueOnce(false);
+    try {
+      await fleet.stop("actions-runner-e2e");
+      expect(fleet.view("actions-runner-e2e")).toMatchObject({ processState: "running", pid, lastError: expect.stringContaining("停止失败") });
+    } finally {
+      stop.mockRestore();
+      await fleet.stop("actions-runner-e2e");
+    }
+    await waitFor(() => fleet!.view("actions-runner-e2e")?.processState === "stopped" ? true : null, "重试停止成功");
+    expect(fleet.view("actions-runner-e2e")?.lastError).toBeNull();
+  });
+
   it("发现实例并从历史日志恢复最近动作状态", async () => {
     fleet = new fleetModule.Fleet();
     await fleet.boot();

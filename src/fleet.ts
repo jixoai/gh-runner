@@ -292,11 +292,11 @@ export class Fleet {
     // spawn 失败只发 error+close 不发 exit——必须用 close 收尾（exit 的超集）。
     spawned.child.on("close", (code, signal) => {
       if (rt.child?.pid !== spawned.pid) return;
+      const graceful = rt.processState === "stopping" || signal === "SIGTERM" || code === 0;
       rt.child = null;
       rt.pid = null;
       rt.processState = "stopped";
       rt.currentJob = null;
-      const graceful = signal === "SIGTERM" || code === 0;
       rt.lastError = spawnError
         ? `启动失败：${spawnError.message}`
         : graceful
@@ -354,6 +354,10 @@ export class Fleet {
       rt.processState = ok ? "stopped" : "running";
       if (!ok) rt.lastError = "停止失败：进程无响应或无权限（可能由 sudo 启动）";
       rt.currentJob = null;
+    } else if (!ok && rt.child?.pid === pid && rt.processState === "stopping") {
+      rt.processState = "running";
+      rt.stoppingUntilMs = 0;
+      rt.lastError = "停止失败：进程无响应或无权限（可能由 sudo 启动）";
     }
     this.#emit();
   }
