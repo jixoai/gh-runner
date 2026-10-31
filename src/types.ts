@@ -80,6 +80,7 @@ export interface DownloadState {
   pct: number;
   message: string;
   network?: string;
+  source?: string;
 }
 
 export interface ReleaseInfo {
@@ -192,7 +193,7 @@ export type UiCommand =
   | { type: "open-work-dir"; id: string }
   | ({ type: "runner-operation" } & RunnerOperationRequest)
   | { type: "open-url"; url: string }
-  | { type: "download-latest" }
+  | { type: "download-latest"; sourceTemplate?: string }
   | { type: "pause-download" }
   | { type: "resume-download" }
   | { type: "cancel-download" }

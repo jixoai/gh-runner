@@ -5,6 +5,7 @@
 
 import { store, type UiCommand } from "./lib/host";
 import type { AuthorizationState, DownloadState, RegistrationBatchState, RunnerOperationState, RunnerOperationRequest } from "../types.ts";
+import { downloadTemplateError } from "../download-source.ts";
 
 interface DemoInstance {
   id: string;
@@ -275,7 +276,13 @@ export const demoHost = {
     }
     if (cmd.type === "download-latest") {
       if (download && ["running", "paused", "cancelling"].includes(download.status)) return;
-      download = { status: "running", pct: 0, message: "下载 actions-runner-osx-arm64-2.340.0.tar.gz（演示）", network: "系统代理 · HTTPS 127.0.0.1:7890 · HTTP 127.0.0.1:7890（演示）" };
+      const problem = downloadTemplateError(cmd.sourceTemplate ?? "");
+      if (problem) {
+        download = { status: "error", pct: 0, message: problem };
+        sink();
+        return;
+      }
+      download = { status: "running", pct: 0, message: "下载 actions-runner-osx-arm64-2.340.0.tar.gz（演示）", network: "系统代理 · HTTPS 127.0.0.1:7890 · HTTP 127.0.0.1:7890（演示）", source: cmd.sourceTemplate?.trim() ? "自定义加速源 · 官方 SHA-256 校验（演示）" : "GitHub 官方（演示）" };
       let pct = 0;
       downloadTimer = setInterval(() => {
         if (download?.status !== "running") return;

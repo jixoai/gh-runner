@@ -208,13 +208,13 @@ export class Fleet {
   }
 
   /** 下载 actions/runner 最新平台的包（进度写入 snapshot.download，完成后刷新清单）。 */
-  downloadLatest(): Promise<void> {
+  downloadLatest(sourceTemplate = ""): Promise<void> {
     if (this.#downloadPromise) return this.#downloadPromise;
     if (this.#downloadClearTimer) clearTimeout(this.#downloadClearTimer);
     const job = new PackageDownload((state) => {
       this.#download = state;
       this.#emitSoon();
-    });
+    }, sourceTemplate);
     this.#downloadJob = job;
     this.#downloadPromise = (async () => {
       try {

@@ -10,6 +10,7 @@ import { store, type SummaryPush } from "@/lib/host";
 import { useTicker } from "@/lib/hooks";
 import { nextRunner, registrationError, runnerPaths, type RunnerDraft } from "@/lib/registration-form";
 import { parseRunnerTarget } from "../../github-target.ts";
+import { downloadTemplateError } from "../../download-source.ts";
 
 export function RegisterDialog({ open, onOpenChange, summary }: {
   open: boolean;
@@ -27,6 +28,9 @@ export function RegisterDialog({ open, onOpenChange, summary }: {
   const [clientId, setClientId] = useState(defaults?.clientId ?? "");
   const [token, setToken] = useState("");
   const [packagePath, setPackagePath] = useState("");
+  const [downloadSource, setDownloadSource] = useState<"github" | "mirror">("github");
+  const [sourceTemplate, setSourceTemplate] = useState("");
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const [labels, setLabels] = useState("");
   const [stage, setStage] = useState<"configure" | "progress">(summary?.task.status === "running" ? "progress" : "configure");
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +64,12 @@ export function RegisterDialog({ open, onOpenChange, summary }: {
 
   const addRunner = () => {
     setRunners((current) => [...current, nextRunner(base, [...current.map((runner) => runner.name), ...(summary?.instances.map((instance) => instance.name) ?? [])], nextKey.current++)]);
+  };
+  const startDownload = () => {
+    const template = downloadSource === "mirror" ? sourceTemplate.trim() : "";
+    const problem = downloadSource === "mirror" && !template ? "请填写可信加速源的地址模板" : downloadTemplateError(template);
+    setDownloadError(problem);
+    if (!problem) store.send({ type: "download-latest", sourceTemplate: template });
   };
   const updateRunner = (key: number, patch: Partial<RunnerDraft>) => setRunners((current) => current.map((runner) => runner.key === key ? { ...runner, ...patch } : runner));
   const submit = () => {
@@ -149,8 +159,23 @@ export function RegisterDialog({ open, onOpenChange, summary }: {
                   <SelectTrigger aria-label="Runner 分发包" className="w-full min-w-0"><span className="truncate">{packages.find((pkg) => pkg.path === selectedPkg)?.name ?? "下载最新版或导入已有分发包"}</span></SelectTrigger>
                   <SelectContent>{packages.map((pkg) => <SelectItem key={pkg.path} value={pkg.path} disabled={!pkg.compatible}>{pkg.name}{!pkg.compatible ? " · 不兼容当前平台" : ""}</SelectItem>)}</SelectContent>
                 </Select>
+                <details className="mt-2 text-xs text-muted-foreground">
+                  <summary className="cursor-pointer rounded py-1 focus-visible:outline-2 focus-visible:outline-ring">下载源与加速</summary>
+                  <fieldset disabled={downloading} className="mt-3 space-y-3">
+                    <legend className="sr-only">下载源</legend>
+                    <div className="flex flex-wrap gap-x-5 gap-y-3 text-sm text-foreground">
+                      <label className="flex cursor-pointer items-center gap-2"><input type="radio" name={`${id}-download-source`} checked={downloadSource === "github"} onChange={() => { setDownloadSource("github"); setDownloadError(null); }} className="size-4 accent-primary" />GitHub 官方</label>
+                      <label className="flex cursor-pointer items-center gap-2"><input type="radio" name={`${id}-download-source`} checked={downloadSource === "mirror"} onChange={() => { setDownloadSource("mirror"); setDownloadError(null); }} className="size-4 accent-primary" />自定义加速源</label>
+                    </div>
+                    {downloadSource === "mirror" && <Field id={`${id}-source-template`} label="加速地址模板" hint="支持 {url}（官方完整地址）、{version}（版本号）、{asset}（文件名）；仅用于本次下载。">
+                      <Input id={`${id}-source-template`} value={sourceTemplate} onChange={(event) => { setSourceTemplate(event.target.value); setDownloadError(null); }} placeholder="https://你的加速服务/{url}" autoComplete="off" spellCheck={false} />
+                    </Field>}
+                    <p className="leading-relaxed">官方 API 限流时自动改用官方发布页查询版本。加速源请使用你信任的 HTTPS 服务；校验值始终来自 GitHub 官方，校验失败不会使用，也不会发送 GitHub 授权凭据。实际速度取决于服务和网络。</p>
+                  </fieldset>
+                </details>
+                {downloadError && <p role="alert" className="mt-2 text-xs text-bad">{downloadError}</p>}
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <Button variant="outline" size="sm" disabled={downloading} onClick={() => store.send({ type: "download-latest" })}><Download className="size-4" />{download?.status === "error" ? "重新下载" : "下载最新版"}</Button>
+                  <Button variant="outline" size="sm" disabled={downloading} onClick={startDownload}><Download className="size-4" />{download?.status === "error" ? "重新下载" : "下载最新版"}</Button>
                   <Button variant="ghost" size="sm" onClick={() => store.send({ type: "import-package" })}><FolderInput className="size-4" />导入已有包</Button>
                 </div>
                 <p className="mt-2 text-xs text-muted-foreground">本批共用一个分发包，仅下载一次，分别解包到独立目录。</p>
@@ -158,6 +183,7 @@ export function RegisterDialog({ open, onOpenChange, summary }: {
                   {downloading && <Progress value={download.pct} aria-label="分发包下载进度" />}
                   <p role="status" className={`break-words text-xs ${download.status === "error" ? "text-bad" : "text-muted-foreground"}`}>{downloading ? `${download.pct}% · ` : ""}{download.message}</p>
                   {download.network && <p className="break-words text-xs text-muted-foreground">连接：{download.network}</p>}
+                  {download.source && <p className="break-words text-xs text-muted-foreground">下载源：{download.source}</p>}
                   {downloading && <div className="flex flex-wrap gap-2">
                     {download.status === "running" && <Button variant="outline" size="sm" onClick={() => store.send({ type: "pause-download" })}><Pause className="size-4" />暂停下载</Button>}
                     {download.status === "paused" && <Button variant="outline" size="sm" onClick={() => store.send({ type: "resume-download" })}><Play className="size-4" />继续下载</Button>}

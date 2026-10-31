@@ -18,6 +18,7 @@ import { configDir } from "./config.ts";
 import { packageCompatible } from "./platform.ts";
 import { createPackageTransport, type PackageTransport } from "./package-network.ts";
 import { fetchLatestReleaseInfo } from "./runner-release.ts";
+import { checkedMirrorRequest, downloadTemplateError, packageDownloadUrl } from "./download-source.ts";
 import type { DownloadState, PackageInfo, ReleaseInfo } from "./types.ts";
 
 export type { DownloadState, PackageInfo, ReleaseInfo };
@@ -72,6 +73,7 @@ async function packageChecksum(path: string, signal?: AbortSignal): Promise<stri
 /** 流式下载到包缓存目录（tmp→rename 原子替换）；onProgress 以 0-100 汇报。 */
 export interface DownloadCheckpoint {
   validator?: string;
+  totalBytes?: number;
 }
 
 export async function downloadPackage(
@@ -89,6 +91,14 @@ export async function downloadPackage(
     const cached = await stat(dest).catch(() => null);
     if (cached?.isFile() && (!release.sizeBytes || cached.size === release.sizeBytes) && await packageChecksum(dest, signal) === release.sha256) {
       onProgress(100, cached.size, cached.size);
+      return dest;
+    }
+    const partial = await stat(tmp).catch(() => null);
+    const expectedSize = release.sizeBytes || checkpoint?.totalBytes;
+    if (partial?.isFile() && expectedSize && partial.size === expectedSize && await packageChecksum(tmp, signal) === release.sha256) {
+      signal?.throwIfAborted();
+      await rename(tmp, dest);
+      onProgress(100, partial.size, partial.size);
       return dest;
     }
   }
@@ -130,6 +140,7 @@ export async function downloadPackage(
     if (checkpoint) {
       const etag = res.headers.get("etag");
       checkpoint.validator = etag && !etag.startsWith("W/") ? etag : res.headers.get("last-modified") ?? undefined;
+      checkpoint.totalBytes = total;
     }
     let lastPct = -1;
     const progress = () => {
@@ -172,11 +183,12 @@ export class PackageDownload {
   #settled = false;
   #wake: (() => void) | null = null;
   #network: string | undefined;
+  #source = "GitHub 官方";
 
-  constructor(private readonly onState: (state: DownloadState) => void) {}
+  constructor(private readonly onState: (state: DownloadState) => void, private readonly sourceTemplate = "") {}
 
   #publish(status: DownloadState["status"], message: string, pct = this.#state.pct): void {
-    this.#state = { status, message, pct, network: this.#network };
+    this.#state = { status, message, pct, network: this.#network, source: this.#source };
     this.onState(this.#state);
   }
 
@@ -208,6 +220,8 @@ export class PackageDownload {
     const checkpoint: DownloadCheckpoint = {};
     this.onState(this.#state);
     try {
+      const problem = downloadTemplateError(this.sourceTemplate);
+      if (problem) throw new Error(problem);
       while (!this.#cancelled) {
         if (this.#paused) await new Promise<void>((resolve) => { this.#wake = resolve; });
         this.#wake = null;
@@ -222,11 +236,15 @@ export class PackageDownload {
           this.#publish("running", release ? "正在继续下载…" : "查询最新 release…");
           release ??= await fetchLatestReleaseInfo(controller.signal, transport.fetch);
           controller.signal.throwIfAborted();
+          const mirror = Boolean(this.sourceTemplate.trim());
+          if (mirror && !release.sha256) throw new Error("无法获取 GitHub 官方 SHA-256，不能安全使用加速源；请选择官方下载或导入已有包");
+          const assetUrl = packageDownloadUrl(release, this.sourceTemplate);
+          this.#source = mirror ? `自定义加速源 · ${new URL(assetUrl).host} · 官方 SHA-256 校验` : "GitHub 官方";
           const description = `${release.metadataSource ? `${release.metadataSource}；` : ""}下载并校验 ${release.assetName}`;
           this.#publish("running", description);
-          const dest = await downloadPackage(release, (pct) => {
+          const dest = await downloadPackage({ ...release, url: assetUrl }, (pct) => {
             if (!this.#paused && !this.#cancelled) this.#publish("running", description, pct);
-          }, controller.signal, checkpoint, transport.fetch);
+          }, controller.signal, checkpoint, mirror ? checkedMirrorRequest(transport.fetch) : transport.fetch);
           this.#settled = true;
           this.#publish("ok", `已下载 ${dest}`, 100);
           return dest;

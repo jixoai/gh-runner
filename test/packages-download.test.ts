@@ -26,6 +26,7 @@ let invalidRange: boolean;
 let hangMetadata: boolean;
 let hangHeaders: boolean;
 let truncate: boolean;
+let mirrors: { url: string; headers: Headers }[];
 const content = Buffer.alloc(256 * 1024, "runner archive");
 const sessions = new Set<ServerResponse>();
 
@@ -33,6 +34,7 @@ beforeEach(async () => {
   vi.stubEnv("GH_RUNNER_PROXY", "direct");
   isolated.root = await mkdtemp(join(tmpdir(), "runner-download-"));
   states = []; jobs = []; pending = []; ranges = [];
+  mirrors = [];
   ignoreRange = false; invalidRange = false; hangMetadata = false; hangHeaders = false; truncate = false;
   server = createServer((request, response) => {
     sessions.add(response);
@@ -69,6 +71,10 @@ beforeEach(async () => {
       }
       return Response.json({ tag_name: release.tag, assets: [{ name: release.assetName, browser_download_url: release.url, size: content.length, digest: release.sha256 ? `sha256:${release.sha256}` : undefined }] });
     }
+    if (String(input).startsWith("https://mirror.test/")) {
+      mirrors.push({ url: String(input), headers: new Headers(init?.headers) });
+      return realFetch(release.url, init);
+    }
     return realFetch(input, init);
   });
 });
@@ -85,8 +91,8 @@ afterEach(async () => {
   await rm(isolated.root, { recursive: true, force: true });
 });
 
-function start() {
-  const job = new PackageDownload((state) => states.push(state));
+function start(sourceTemplate = "") {
+  const job = new PackageDownload((state) => states.push(state), sourceTemplate);
   jobs.push(job);
   const done = job.run();
   pending.push(done);
@@ -98,6 +104,39 @@ async function progressed() {
 }
 
 describe("runner 分发包下载控制", () => {
+  it("只有大包经过加速源，支持暂停续传，并校验官方哈希", async () => {
+    release.sha256 = createHash("sha256").update(content).digest("hex");
+    const { job, done } = start("https://mirror.test/v{version}/{asset}");
+    await progressed(); job.pause();
+    await vi.waitFor(() => expect(sessions.size).toBe(0));
+    job.resume();
+    expect(await readFile((await done)!)).toEqual(content);
+    expect(mirrors).toHaveLength(2);
+    expect(mirrors.every((value) => value.url === `https://mirror.test/${release.tag}/${release.assetName}`)).toBe(true);
+    expect(mirrors.every((value) => !value.headers.has("Authorization") && !value.headers.has("Cookie"))).toBe(true);
+    expect(mirrors[1]!.headers.get("range")).toMatch(/^bytes=\d+-$/);
+    expect(states.at(-1)?.source).toContain("mirror.test");
+  });
+
+  it("缺少官方哈希时不会向加速源发出下载请求", async () => {
+    expect(await start("https://mirror.test/{url}").done).toBeNull();
+    expect(states.at(-1)).toMatchObject({ status: "error", message: expect.stringContaining("官方 SHA-256") });
+    expect(mirrors).toEqual([]);
+  });
+
+  it("无效加速地址在查询 GitHub 之前就被拒绝", async () => {
+    expect(await start("http://mirror.test/{url}").done).toBeNull();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(states.at(-1)?.status).toBe("error");
+  });
+
+  it("加速源返回同大小的错误内容时仍拒绝使用并清理", async () => {
+    release.sha256 = "00".repeat(32);
+    expect(await start("https://mirror.test/{url}").done).toBeNull();
+    expect(states.at(-1)).toMatchObject({ status: "error", message: expect.stringContaining("SHA-256") });
+    expect(await readdir(packagesDir())).toEqual([]);
+  });
+
   it("复用 SHA-256 校验正确的缓存，不再请求大包", async () => {
     release.sha256 = createHash("sha256").update(content).digest("hex");
     await mkdir(packagesDir(), { recursive: true });
@@ -106,6 +145,15 @@ describe("runner 分发包下载控制", () => {
     expect(await start().done).toBe(dest);
     expect(ranges).toEqual([]);
     expect(states.at(-1)?.status).toBe("ok");
+  });
+
+  it("校验阶段暂停留下的完整 .part 文件，继续时只校验不重下载", async () => {
+    release.sha256 = createHash("sha256").update(content).digest("hex");
+    await mkdir(packagesDir(), { recursive: true });
+    await writeFile(join(packagesDir(), `${release.assetName}.part`), content);
+    const dest = await downloadPackage({ ...release, sizeBytes: 0 }, () => {}, undefined, { totalBytes: content.length });
+    expect(await readFile(dest)).toEqual(content);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   it("缓存已损坏时重新下载，并验证官方 SHA-256", async () => {
