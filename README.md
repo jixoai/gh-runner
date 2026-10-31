@@ -104,6 +104,10 @@ Linux：opentray 的 ext-webview/dialog 不发布 Linux 原生运行时，暂不
 
 ## GitHub 授权配置与安全边界
 
+授权请求与安装包下载使用相同的代理设置：`GH_RUNNER_PROXY` → HTTP / HTTPS 环境变量 → 系统代理，并遵循绕过规则。
+申请验证码、轮询确认和申请 runner Token 均通过该连接访问 GitHub 官方域名，不使用下载加速镜像。
+单次请求（含读取响应体）30 秒超时；错误会说明授权阶段和连接方式。超时不代表权限不足，可检查代理后重试，或使用已有注册 / 注销 Token。
+
 手机授权需要**本项目自己的 GitHub App**，不是 OAuth App，也不借用 GitHub CLI 的身份。
 首次由维护者完成以下设置，普通用户不需要自行创建 App：
 

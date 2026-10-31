@@ -1,5 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { parseRunnerTarget } from "./github-target.ts";
+import { createPackageTransport } from "./package-network.ts";
 
 declare const __GITHUB_APP_CLIENT_ID__: string;
 
@@ -26,33 +27,72 @@ interface AuthorizationOptions {
 }
 
 type Json = Record<string, unknown>;
+const invalidResponse = "GitHub 返回了无法识别的响应，请稍后重试";
 
 async function readJson(response: Response): Promise<Json> {
   try {
     const data: unknown = await response.json();
     if (typeof data === "object" && data !== null && !Array.isArray(data)) return data as Json;
-  } catch {}
-  throw new Error("GitHub 返回了无法识别的响应，请稍后重试");
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+  }
+  throw new Error(invalidResponse);
 }
 
 export async function authorizeRunners(
   options: AuthorizationOptions,
-  request: typeof fetch = fetch,
+  request?: typeof fetch,
+): Promise<string[]> {
+  parseRunnerTarget(options.targetUrl);
+  if (!Number.isInteger(options.count) || options.count < 1 || options.count > 10) throw new Error("每批可创建 1–10 个 runner");
+  if (!options.clientId.trim()) throw new Error("尚未配置 GitHub App Client ID，请联系应用维护者或使用手动 Token");
+  let transport: Awaited<ReturnType<typeof createPackageTransport>> | undefined;
+  try {
+    options.signal.throwIfAborted();
+    if (!request) transport = await createPackageTransport(options.signal);
+    return await authorizeWithRequest(options, request ?? transport!.fetch, transport?.description ?? "自定义网络连接");
+  } catch (error) {
+    if (options.signal.aborted) throw new Error("授权已取消，本机临时凭据已清理");
+    throw error;
+  } finally {
+    await transport?.close().catch(() => {});
+  }
+}
+
+async function authorizeWithRequest(
+  options: AuthorizationOptions,
+  request: typeof fetch,
+  network: string,
 ): Promise<string[]> {
   const { clientId, signal, onCode, onAuthorized } = options;
   const target = parseRunnerTarget(options.targetUrl);
-  if (!Number.isInteger(options.count) || options.count < 1 || options.count > 10) throw new Error("每批可创建 1–10 个 runner");
   const removing = options.purpose === "remove";
-  if (!clientId.trim()) throw new Error("尚未配置 GitHub App Client ID，请联系应用维护者或使用手动 Token");
-  const post = (path: string, values: Record<string, string>, activeSignal = signal) => request(`https://github.com${path}`, {
+  const requestJson = async (url: string, init: RequestInit, stage: string, activeSignal = signal) => {
+    const timeout = AbortSignal.timeout(30_000);
+    try {
+      const response = await request(url, {
+        ...init,
+        signal: AbortSignal.any([activeSignal, timeout]),
+        redirect: "error",
+      });
+      const data = await readJson(response);
+      return { response, data };
+    } catch (error) {
+      if (signal.aborted) throw new Error("授权已取消，本机临时凭据已清理");
+      if (activeSignal.aborted) throw new Error("验证码已过期，请重新发起授权");
+      if (timeout.aborted || (error instanceof Error && error.name === "TimeoutError")) {
+        throw new Error(`${stage}超时，请检查网络和代理后重试。连接方式：${network}`);
+      }
+      if (error instanceof Error && error.message === invalidResponse) throw error;
+      throw new Error(`${stage}失败，请检查网络和代理后重试。连接方式：${network}`);
+    }
+  };
+  const post = (path: string, values: Record<string, string>, stage: string, activeSignal = signal) => requestJson(`https://github.com${path}`, {
     method: "POST",
     headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams(values),
-    signal: AbortSignal.any([activeSignal, AbortSignal.timeout(20_000)]),
-    redirect: "error",
-  });
-  const codeResponse = await post("/login/device/code", { client_id: clientId });
-  const code = await readJson(codeResponse);
+  }, stage, activeSignal);
+  const { response: codeResponse, data: code } = await post("/login/device/code", { client_id: clientId }, "申请 GitHub 设备验证码");
   if (!codeResponse.ok || code.error) {
     throw new Error("无法发起 GitHub 授权，请检查 Client ID，并在 GitHub App 设置中启用 Device Flow");
   }
@@ -74,12 +114,11 @@ export async function authorizeRunners(
   try {
     while (!accessToken) {
       await delay(interval * 1000, undefined, { signal: pollingSignal });
-      const response = await post("/login/oauth/access_token", {
+      const { response, data: result } = await post("/login/oauth/access_token", {
         client_id: clientId,
         device_code: code.device_code,
         grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-      }, pollingSignal);
-      const result = await readJson(response);
+      }, "等待 GitHub 授权确认", pollingSignal);
       if (result.error === "authorization_pending") continue;
       if (result.error === "slow_down") {
         interval += 5;
@@ -98,13 +137,10 @@ export async function authorizeRunners(
     onAuthorized();
     for (let index = 0; index < options.count; index += 1) {
       const apiPath = removing ? target.apiPath.replace(/registration-token$/, "remove-token") : target.apiPath;
-      const response = await request(`https://api.github.com${apiPath}`, {
+      const { response, data: registration } = await requestJson(`https://api.github.com${apiPath}`, {
         method: "POST",
         headers: { Accept: "application/vnd.github+json", Authorization: `Bearer ${accessToken}` },
-        signal: AbortSignal.any([signal, AbortSignal.timeout(20_000)]),
-        redirect: "error",
-      });
-      const registration = await readJson(response);
+      }, `申请 runner ${removing ? "注销" : "注册"} Token `);
       if (!response.ok) {
         if (response.status === 403 || response.status === 404) {
           throw new Error(target.kind === "organization"

@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { authorizeRunners, githubClientId } from "../src/github-auth.ts";
 import { parseRunnerTarget } from "../src/github-target.ts";
 import { setTimeout as delay } from "node:timers/promises";
+import { createPackageTransport } from "../src/package-network.ts";
 
 vi.mock("node:timers/promises", () => ({ setTimeout: vi.fn(async () => {}) }));
+vi.mock("../src/package-network.ts", () => ({ createPackageTransport: vi.fn() }));
 
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
 const codeResponse = () => json({ device_code: "PRIVATE_DEVICE_CODE", user_code: "ABCD-1234", verification_uri: "https://github.com/login/device", expires_in: 900, interval: 5 });
@@ -31,6 +33,56 @@ describe("内置 GitHub App Client ID", () => {
 });
 
 describe("GitHub Device Flow", () => {
+  it("默认所有授权步骤共用代理连接，并在完成后释放连接", async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(codeResponse()).mockResolvedValueOnce(json({ access_token: "PRIVATE_ACCESS" })).mockResolvedValueOnce(json({ token: "REMOVE_SECRET" }, 201));
+    const close = vi.fn(async () => {});
+    vi.mocked(createPackageTransport).mockResolvedValueOnce({ description: "系统代理 · HTTPS 127.0.0.1:7890", fetch: request, close });
+    const raw = vi.fn<typeof fetch>().mockRejectedValue(new Error("不应绕过代理"));
+    vi.stubGlobal("fetch", raw);
+    const input = { ...options(), purpose: "remove" as const };
+    expect(await authorizeRunners(input)).toEqual(["REMOVE_SECRET"]);
+    expect(createPackageTransport).toHaveBeenCalledWith(input.signal);
+    expect(request.mock.calls.map((call) => new URL(String(call[0])).hostname)).toEqual(["github.com", "github.com", "api.github.com"]);
+    expect(raw).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("申请验证码失败也释放代理连接，不回显底层敏感错误", async () => {
+    const close = vi.fn(async () => {});
+    vi.mocked(createPackageTransport).mockResolvedValueOnce({ description: "系统代理 · HTTPS 127.0.0.1:7890", fetch: vi.fn<typeof fetch>().mockRejectedValue(new Error("SECRET_PROXY_PASSWORD")), close });
+    vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockRejectedValue(new Error("旧直连路径")));
+    const pending = authorizeRunners(options());
+    await expect(pending).rejects.toThrow("申请 GitHub 设备验证码失败");
+    await expect(pending).rejects.toThrow("127.0.0.1:7890");
+    await expect(pending).rejects.not.toThrow("SECRET_PROXY_PASSWORD");
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it.each([0, 1, 2])("第 %s 步超时给出阶段和重试指引", async (step) => {
+    const request = vi.fn<typeof fetch>();
+    if (step > 0) request.mockResolvedValueOnce(codeResponse());
+    if (step > 1) request.mockResolvedValueOnce(json({ access_token: "PRIVATE_ACCESS" }));
+    request.mockRejectedValueOnce(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+    const pending = authorizeRunners({ ...options(), purpose: "remove" }, request);
+    await expect(pending).rejects.toThrow(["申请 GitHub 设备验证码超时", "等待 GitHub 授权确认超时", "申请 runner 注销 Token 超时"][step]);
+    await expect(pending).rejects.toThrow("网络和代理");
+  });
+
+  it("响应头到达后读取响应体超时也显示授权阶段，不误报响应格式", async () => {
+    const response = codeResponse();
+    vi.spyOn(response, "json").mockRejectedValueOnce(new DOMException("timeout", "TimeoutError"));
+    await expect(authorizeRunners(options(), vi.fn<typeof fetch>().mockResolvedValueOnce(response))).rejects.toThrow("申请 GitHub 设备验证码超时");
+  });
+
+  it("申请验证码时取消不会误报超时", async () => {
+    const controller = new AbortController();
+    const request = vi.fn<typeof fetch>().mockImplementation(async () => {
+      controller.abort();
+      throw new DOMException("aborted", "AbortError");
+    });
+    await expect(authorizeRunners({ ...options(), signal: controller.signal }, request)).rejects.toThrow("授权已取消");
+  });
+
   it.each(["https://github.com/acme", "https://github.com/alice/project"])("注销使用独立 remove-token 接口：%s", async (targetUrl) => {
     const request = vi.fn<typeof fetch>().mockResolvedValueOnce(codeResponse()).mockResolvedValueOnce(json({ access_token: "PRIVATE_ACCESS", refresh_token: "PRIVATE_REFRESH" })).mockResolvedValueOnce(json({ token: "REMOVE_SECRET" }, 201));
     const input = { ...options(), purpose: "remove" as const, targetUrl };
