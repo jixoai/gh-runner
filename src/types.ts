@@ -88,6 +88,8 @@ export interface ReleaseInfo {
   assetName: string;
   url: string;
   sizeBytes: number;
+  sha256?: string;
+  metadataSource?: string;
 }
 
 export interface AuthorizationState {

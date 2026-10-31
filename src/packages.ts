@@ -8,17 +8,20 @@
  * 3. 纯函数资产名映射（platform.ts）的单测入口不在此处。
  */
 
-import { createWriteStream, existsSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { configDir } from "./config.ts";
-import { assetNameFor, packageCompatible } from "./platform.ts";
+import { packageCompatible } from "./platform.ts";
 import { createPackageTransport, type PackageTransport } from "./package-network.ts";
+import { fetchLatestReleaseInfo } from "./runner-release.ts";
 import type { DownloadState, PackageInfo, ReleaseInfo } from "./types.ts";
 
 export type { DownloadState, PackageInfo, ReleaseInfo };
+export { fetchLatestReleaseInfo } from "./runner-release.ts";
 
 /** 下载缓存目录（下载的包与导入清单都归工具所有）。 */
 export function packagesDir(): string {
@@ -59,28 +62,11 @@ export async function listPackages(importedPaths: string[]): Promise<PackageInfo
   return [...out.values()].sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
-/** 查询 actions/runner 最新 release 中匹配当前平台的资产。 */
-export async function fetchLatestReleaseInfo(signal?: AbortSignal, request = fetch): Promise<ReleaseInfo> {
-  const res = await request("https://api.github.com/repos/actions/runner/releases/latest", {
-    signal: AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(30_000)]),
-    headers: { "User-Agent": "jixoai-gh-runner", Accept: "application/vnd.github+json" },
-  });
-  if (!res.ok) {
-    await res.body?.cancel();
-    throw new Error(`GitHub API ${res.status}（查询最新 release 失败）`);
-  }
-  const body = (await res.json()) as {
-    tag_name?: string;
-    assets?: { name: string; browser_download_url: string; size: number }[];
-  };
-  const version = (body.tag_name ?? "").replace(/^v/, "");
-  if (!version || !Array.isArray(body.assets)) throw new Error("release 响应缺少 tag_name/assets");
-  const assetName = assetNameFor(version);
-  const asset = body.assets.find((a) => a.name === assetName);
-  if (!asset) {
-    throw new Error(`最新 release ${body.tag_name} 没有当前平台的资产（期望 ${assetName}）`);
-  }
-  return { tag: body.tag_name!, version, assetName, url: asset.browser_download_url, sizeBytes: asset.size };
+async function packageChecksum(path: string, signal?: AbortSignal): Promise<string> {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(path, { signal })) hash.update(chunk);
+  signal?.throwIfAborted();
+  return hash.digest("hex");
 }
 
 /** 流式下载到包缓存目录（tmp→rename 原子替换）；onProgress 以 0-100 汇报。 */
@@ -99,6 +85,13 @@ export async function downloadPackage(
   await mkdir(packagesDir(), { recursive: true });
   const dest = join(packagesDir(), release.assetName);
   const tmp = `${dest}.part`;
+  if (release.sha256) {
+    const cached = await stat(dest).catch(() => null);
+    if (cached?.isFile() && (!release.sizeBytes || cached.size === release.sizeBytes) && await packageChecksum(dest, signal) === release.sha256) {
+      onProgress(100, cached.size, cached.size);
+      return dest;
+    }
+  }
   const partialSize = checkpoint?.validator ? (await stat(tmp).catch(() => null))?.size ?? 0 : 0;
   const offset = release.sizeBytes > 0 && partialSize >= release.sizeBytes ? 0 : partialSize;
   const stalled = new AbortController();
@@ -119,7 +112,9 @@ export async function downloadPackage(
     const res = await request(release.url, { headers, redirect: "follow", signal: requestSignal });
     if (!res.ok || !res.body) {
       await res.body?.cancel();
-      throw new Error(`下载失败：HTTP ${res.status}`);
+      throw new Error(res.status === 403
+        ? "包下载服务器返回 HTTP 403（不是版本查询 API 限流）；请更换代理节点、使用可信加速源或导入已有包"
+        : `下载失败：HTTP ${res.status}`);
     }
     let received = 0;
     let total = release.sizeBytes || Number(res.headers.get("content-length")) || 0;
@@ -153,7 +148,10 @@ export async function downloadPackage(
     });
     await pipeline(source, createWriteStream(tmp, { flags: received > 0 ? "a" : "w" }), { signal: requestSignal });
     requestSignal.throwIfAborted();
+    clearTimeout(timer!);
     if (total > 0 && received !== total) throw new Error(`下载不完整：${received}/${total} 字节`);
+    if (release.sha256 && await packageChecksum(tmp, signal) !== release.sha256) throw new Error("分发包 SHA-256 与 GitHub 官方校验值不一致，已拒绝使用；请更换下载源后重试");
+    signal?.throwIfAborted();
     await rename(tmp, dest);
     onProgress(100, received, total);
     return dest;
@@ -224,9 +222,10 @@ export class PackageDownload {
           this.#publish("running", release ? "正在继续下载…" : "查询最新 release…");
           release ??= await fetchLatestReleaseInfo(controller.signal, transport.fetch);
           controller.signal.throwIfAborted();
-          this.#publish("running", `下载 ${release.assetName}`);
+          const description = `${release.metadataSource ? `${release.metadataSource}；` : ""}下载并校验 ${release.assetName}`;
+          this.#publish("running", description);
           const dest = await downloadPackage(release, (pct) => {
-            if (!this.#paused && !this.#cancelled) this.#publish("running", `下载 ${release!.assetName}`, pct);
+            if (!this.#paused && !this.#cancelled) this.#publish("running", description, pct);
           }, controller.signal, checkpoint, transport.fetch);
           this.#settled = true;
           this.#publish("ok", `已下载 ${dest}`, 100);

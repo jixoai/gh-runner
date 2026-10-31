@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer, type Server, type ServerResponse } from "node:http";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm, stat, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -66,7 +67,7 @@ beforeEach(async () => {
           else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
         });
       }
-      return Response.json({ tag_name: release.tag, assets: [{ name: release.assetName, browser_download_url: release.url, size: content.length }] });
+      return Response.json({ tag_name: release.tag, assets: [{ name: release.assetName, browser_download_url: release.url, size: content.length, digest: release.sha256 ? `sha256:${release.sha256}` : undefined }] });
     }
     return realFetch(input, init);
   });
@@ -97,6 +98,35 @@ async function progressed() {
 }
 
 describe("runner 分发包下载控制", () => {
+  it("复用 SHA-256 校验正确的缓存，不再请求大包", async () => {
+    release.sha256 = createHash("sha256").update(content).digest("hex");
+    await mkdir(packagesDir(), { recursive: true });
+    const dest = join(packagesDir(), release.assetName);
+    await writeFile(dest, content);
+    expect(await start().done).toBe(dest);
+    expect(ranges).toEqual([]);
+    expect(states.at(-1)?.status).toBe("ok");
+  });
+
+  it("缓存已损坏时重新下载，并验证官方 SHA-256", async () => {
+    release.sha256 = createHash("sha256").update(content).digest("hex");
+    await mkdir(packagesDir(), { recursive: true });
+    await writeFile(join(packagesDir(), release.assetName), Buffer.alloc(content.length));
+    expect(await readFile((await start().done)!)).toEqual(content);
+    expect(ranges).toHaveLength(1);
+  });
+
+  it("长度相同但 SHA-256 不正确也会拒绝，不替换已有包", async () => {
+    release.sha256 = "00".repeat(32);
+    await mkdir(packagesDir(), { recursive: true });
+    const dest = join(packagesDir(), release.assetName);
+    await writeFile(dest, "previous valid archive");
+    expect(await start().done).toBeNull();
+    expect(states.at(-1)).toMatchObject({ status: "error", message: expect.stringContaining("SHA-256") });
+    expect(await readFile(dest, "utf8")).toBe("previous valid archive");
+    expect(await readdir(packagesDir())).toEqual([release.assetName]);
+  });
+
   it("暂停断开连接并停止写入；Range 续传后内容完整，只在成功时出现正式包", async () => {
     const { job, done } = start();
     await progressed();
