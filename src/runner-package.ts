@@ -30,15 +30,3 @@ export function resolvePackageSelection(selection: RunnerPackageSelection = {}, 
 export function runnerPackageName(target: RunnerPackageTarget, version: string): string {
   return `actions-runner-${target}-${version}.${target.startsWith("win-") ? "zip" : "tar.gz"}`;
 }
-
-export function parseRunnerPackageName(input: string): { target: RunnerPackageTarget; version: string } {
-  const name = input.trim();
-  if (["ubuntu-slim", "ubuntu-latest", "windows-latest", "macos-latest"].includes(name)) {
-    throw new Error(`${name} 是 GitHub 托管环境标签，不是本机 runner 安装包。自托管 runner 不会通过这个名字安装对应系统或工具链。`);
-  }
-  const match = /^actions-runner-((?:osx|win|linux)-(?:x64|arm64|arm))-(\d+\.\d+\.\d+)\.(tar\.gz|zip)$/.exec(name);
-  if (!match) throw new Error("请输入完整的官方分发包文件名，例如 actions-runner-linux-x64-2.338.2.tar.gz；自定义 slim 包或容器镜像需要单独适配，不能猜测下载源");
-  const selection = resolvePackageSelection({ target: match[1] as RunnerPackageTarget, version: match[2] });
-  if (runnerPackageName(selection.target, selection.version) !== name) throw new Error("包扩展名与目标平台不匹配：Windows 使用 .zip，macOS / Linux 使用 .tar.gz");
-  return selection;
-}

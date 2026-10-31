@@ -1,17 +1,14 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, Check, CheckCircle2, Copy, Download, ExternalLink, FolderInput, Loader2, Pause, Play, Plus, ShieldCheck, Square, Trash2, XCircle } from "lucide-react";
+import { ArrowLeft, Check, CheckCircle2, Copy, ExternalLink, Loader2, Plus, ShieldCheck, Trash2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Progress } from "@/components/ui/progress";
-import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { RunnerPackagePicker } from "./runner-package-picker";
 import { store, type SummaryPush } from "@/lib/host";
 import { useTicker } from "@/lib/hooks";
 import { nextRunner, registrationError, runnerPaths, type RunnerDraft } from "@/lib/registration-form";
 import { parseRunnerTarget } from "../../github-target.ts";
-import { downloadTemplateError } from "../../download-source.ts";
-import { RUNNER_TARGETS, parseRunnerPackageName, recommendedRunnerTarget, resolvePackageSelection, runnerPackageName, type RunnerPackageTarget } from "../../runner-package.ts";
 
 export function RegisterDialog({ open, onOpenChange, summary }: {
   open: boolean;
@@ -28,15 +25,7 @@ export function RegisterDialog({ open, onOpenChange, summary }: {
   const [method, setMethod] = useState<"github" | "token">("github");
   const [clientId, setClientId] = useState(defaults?.clientId ?? "");
   const [token, setToken] = useState("");
-  const [packagePath, setPackagePath] = useState("");
-  const [downloadTarget, setDownloadTarget] = useState<RunnerPackageTarget | "auto">("auto");
-  const [versionMode, setVersionMode] = useState("latest");
-  const [version, setVersion] = useState("");
-  const [packageName, setPackageName] = useState("");
-  const autoSelectedDownload = useRef<string | null>(null);
-  const [downloadSource, setDownloadSource] = useState<"github" | "mirror">("github");
-  const [sourceTemplate, setSourceTemplate] = useState("");
-  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [packagePath, setPackagePath] = useState(() => summary?.download && ["running", "paused", "cancelling"].includes(summary.download.status) ? "" : summary?.packages.find((pkg) => pkg.compatible)?.path ?? "");
   const [labels, setLabels] = useState("");
   const [stage, setStage] = useState<"configure" | "progress">(summary?.task.status === "running" ? "progress" : "configure");
   const [error, setError] = useState<string | null>(null);
@@ -49,11 +38,7 @@ export function RegisterDialog({ open, onOpenChange, summary }: {
   const waiting = authorization?.status === "waiting";
   const cancellable = busy && authorization && ["requesting", "waiting", "exchanging"].includes(authorization.status);
   const packages = summary?.packages ?? [];
-  const selectedPkg = packages.find((pkg) => pkg.path === packagePath && pkg.compatible)?.path || packages.find((pkg) => pkg.compatible)?.path || "";
-  const recommendedTarget = recommendedRunnerTarget(summary?.platform ?? "", summary?.arch ?? "");
-  const recommendedLabel = RUNNER_TARGETS.find((target) => target.id === recommendedTarget)?.label;
-  const effectiveTarget = downloadTarget === "auto" ? recommendedTarget : downloadTarget;
-  const targetLabel = RUNNER_TARGETS.find((target) => target.id === effectiveTarget)?.label;
+  const selectedPkg = packages.find((pkg) => pkg.path === packagePath && pkg.compatible)?.path ?? "";
   const download = summary?.download;
   const downloading = download != null && ["running", "paused", "cancelling"].includes(download.status);
   const completed = batch?.items.filter((item) => item.status === "ok").length ?? 0;
@@ -66,14 +51,6 @@ export function RegisterDialog({ open, onOpenChange, summary }: {
   }, [pending, requestId, summary?.registrationBatch?.requestId]);
 
   useEffect(() => {
-    if (download?.status !== "ok" || !download.packagePath || autoSelectedDownload.current === download.packagePath) return;
-    const downloaded = packages.find((pkg) => pkg.path === download.packagePath);
-    if (!downloaded) return;
-    autoSelectedDownload.current = downloaded.path;
-    if (downloaded.compatible) setPackagePath(downloaded.path);
-  }, [download?.status, download?.packagePath, packages]);
-
-  useEffect(() => {
     if (defaults) {
       setRoot((current) => current || defaults.parentDir);
       setClientId((current) => current || defaults.clientId);
@@ -82,30 +59,6 @@ export function RegisterDialog({ open, onOpenChange, summary }: {
 
   const addRunner = () => {
     setRunners((current) => [...current, nextRunner(base, [...current.map((runner) => runner.name), ...(summary?.instances.map((instance) => instance.name) ?? [])], nextKey.current++)]);
-  };
-  const startDownload = () => {
-    const template = downloadSource === "mirror" ? sourceTemplate.trim() : "";
-    const problem = downloadSource === "mirror" && !template ? "请填写可信加速源的地址模板" : downloadTemplateError(template);
-    setDownloadError(problem);
-    if (problem) return;
-    try {
-      const selection = resolvePackageSelection({ target: effectiveTarget, version: versionMode === "latest" ? "latest" : version }, recommendedTarget);
-      autoSelectedDownload.current = null;
-      store.send({ type: "download-latest", sourceTemplate: template, selection });
-    } catch (error) {
-      setDownloadError(error instanceof Error ? error.message : String(error));
-    }
-  };
-  const identifyPackage = () => {
-    try {
-      const selection = parseRunnerPackageName(packageName);
-      setDownloadTarget(selection.target);
-      setVersionMode("custom");
-      setVersion(selection.version);
-      setDownloadError(null);
-    } catch (error) {
-      setDownloadError(error instanceof Error ? error.message : String(error));
-    }
   };
   const updateRunner = (key: number, patch: Partial<RunnerDraft>) => setRunners((current) => current.map((runner) => runner.key === key ? { ...runner, ...patch } : runner));
   const submit = () => {
@@ -156,6 +109,7 @@ export function RegisterDialog({ open, onOpenChange, summary }: {
               <Field id={`${id}-target`} label="GitHub 组织或仓库" hint="填写完整地址；这一批实例将注册到同一目标。">
                 <Input id={`${id}-target`} value={targetUrl} onChange={(event) => setTargetUrl(event.target.value)} placeholder="https://github.com/你的组织" autoComplete="off" spellCheck={false} />
               </Field>
+              <RunnerPackagePicker summary={summary} value={selectedPkg} onValueChange={setPackagePath} />
               <section aria-labelledby={`${id}-instances`}>
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                   <h3 id={`${id}-instances`} className="text-sm font-semibold">实例 <span className="ml-1 text-muted-foreground tabular-nums">{runners.length}/10</span></h3>
@@ -188,84 +142,6 @@ export function RegisterDialog({ open, onOpenChange, summary }: {
                     <Field id={`${id}-labels`} label="附加标签（逗号分隔）" hint="留空使用当前平台的默认标签。"><Input id={`${id}-labels`} value={labels} onChange={(event) => setLabels(event.target.value)} placeholder="例如 build,fast" /></Field>
                   </div>
                 </details>
-              </section>
-              <section aria-labelledby={`${id}-package`}>
-                <h3 id={`${id}-package`} className="mb-2 text-sm font-semibold">Runner 分发包</h3>
-                <Select value={selectedPkg} onValueChange={setPackagePath}>
-                  <SelectTrigger aria-label="Runner 分发包" className="w-full min-w-0"><span className="truncate">{packages.find((pkg) => pkg.path === selectedPkg)?.name ?? "选择本地包，或在下方下载 / 导入"}</span></SelectTrigger>
-                  <SelectContent position="popper" align="start" className="max-w-[calc(100vw-2rem)]">{packages.map((pkg) => <SelectItem key={pkg.path} value={pkg.path} disabled={!pkg.compatible}>{pkg.name}{!pkg.compatible ? " · 不兼容当前平台" : ""}</SelectItem>)}</SelectContent>
-                </Select>
-                <p className="mt-2 text-xs text-muted-foreground">当前设备：{recommendedLabel ?? `${summary?.platform ?? "未知系统"} / ${summary?.arch ?? "未知架构"}`}。仅适配本机的包可用于创建 runner。</p>
-                <fieldset disabled={downloading} className="mt-4 space-y-3">
-                  <legend className="text-xs font-medium">选择要下载的包</legend>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field id={`${id}-download-target`} label="操作系统 / CPU 架构">
-                      <Select value={downloadTarget} onValueChange={(value) => { setDownloadTarget(value as RunnerPackageTarget | "auto"); setDownloadError(null); }} disabled={downloading}>
-                        <SelectTrigger id={`${id}-download-target`} aria-label="下载平台与架构" className="w-full min-w-0"><span className="truncate">{downloadTarget === "auto" ? recommendedLabel ? "自动适配（本机推荐）" : "自动适配 · 无匹配平台" : targetLabel}</span></SelectTrigger>
-                        <SelectContent position="popper" align="start">
-                          <SelectItem value="auto">自动适配当前设备（推荐）</SelectItem>
-                          {RUNNER_TARGETS.map((target) => <SelectItem key={target.id} value={target.id}>{target.label}{target.id === recommendedTarget ? " · 本机" : ""}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                    <Field id={`${id}-download-version`} label="Runner 版本">
-                      <Select value={versionMode} onValueChange={(value) => { setVersionMode(value); setDownloadError(null); }} disabled={downloading}>
-                        <SelectTrigger id={`${id}-download-version`} aria-label="下载版本" className="w-full"><span>{versionMode === "latest" ? "最新稳定版（推荐）" : "指定版本"}</span></SelectTrigger>
-                        <SelectContent position="popper" align="start"><SelectItem value="latest">最新稳定版（推荐）</SelectItem><SelectItem value="custom">指定版本</SelectItem></SelectContent>
-                      </Select>
-                    </Field>
-                  </div>
-                  {versionMode === "custom" && <Field id={`${id}-version-number`} label="版本号" hint="填写官方已发布的版本，如 2.338.2（也支持 v 前缀）。旧版可能被 GitHub 要求自动更新。">
-                    <Input id={`${id}-version-number`} value={version} onChange={(event) => { setVersion(event.target.value); setDownloadError(null); }} placeholder="例如 2.338.2" spellCheck={false} autoComplete="off" />
-                  </Field>}
-                  {effectiveTarget && <p className="break-all text-xs text-muted-foreground">{versionMode === "latest" ? "文件名（版本查询后确定）" : "文件名预览"}：{runnerPackageName(effectiveTarget, versionMode === "latest" ? "版本号" : version.trim().replace(/^v/, "") || "版本号")}</p>}
-                  <details className="text-xs text-muted-foreground">
-                    <summary className="cursor-pointer rounded py-1 focus-visible:outline-2 focus-visible:outline-ring">通过分发包文件名识别</summary>
-                    <div className="mt-2 space-y-2">
-                      <Field id={`${id}-package-name`} label="官方分发包文件名" hint="识别后自动填入平台与版本，核对后点击「下载所选包」。仅识别包名，不执行其中的内容。">
-                        <div className="flex flex-col gap-2 sm:flex-row">
-                          <Input id={`${id}-package-name`} className="min-w-0 flex-1" value={packageName} onChange={(event) => { setPackageName(event.target.value); setDownloadError(null); }} placeholder="actions-runner-linux-x64-2.338.2.tar.gz" autoComplete="off" spellCheck={false} />
-                          <Button variant="outline" size="sm" disabled={!packageName.trim()} onClick={identifyPackage}>识别并填入</Button>
-                        </div>
-                      </Field>
-                      <p className="leading-relaxed">ubuntu-slim 等托管环境标签不是安装包；自托管 runner 的系统和工具由本机提供。</p>
-                    </div>
-                  </details>
-                  {effectiveTarget && effectiveTarget !== recommendedTarget && <p role="status" className="text-xs leading-relaxed text-warn">此包与当前设备不匹配。可以下载留存，但不能在这台设备上创建 runner；现有本机包的选择不会改变。</p>}
-                  {!effectiveTarget && <p role="status" className="text-xs text-warn">无法自动匹配此设备，请手动选择下载平台。下载的包仅适用于对应操作系统和架构。</p>}
-                </fieldset>
-                <details className="mt-2 text-xs text-muted-foreground">
-                  <summary className="cursor-pointer rounded py-1 focus-visible:outline-2 focus-visible:outline-ring">下载源与加速</summary>
-                  <fieldset disabled={downloading} className="mt-3 space-y-3">
-                    <legend className="sr-only">下载源</legend>
-                    <div className="flex flex-wrap gap-x-5 gap-y-3 text-sm text-foreground">
-                      <label className="flex cursor-pointer items-center gap-2"><input type="radio" name={`${id}-download-source`} checked={downloadSource === "github"} onChange={() => { setDownloadSource("github"); setDownloadError(null); }} className="size-4 accent-primary" />GitHub 官方</label>
-                      <label className="flex cursor-pointer items-center gap-2"><input type="radio" name={`${id}-download-source`} checked={downloadSource === "mirror"} onChange={() => { setDownloadSource("mirror"); setDownloadError(null); }} className="size-4 accent-primary" />自定义加速源</label>
-                    </div>
-                    {downloadSource === "mirror" && <Field id={`${id}-source-template`} label="加速地址模板" hint="支持 {url}（官方完整地址）、{version}（版本号）、{asset}（文件名）；仅用于本次下载。">
-                      <Input id={`${id}-source-template`} value={sourceTemplate} onChange={(event) => { setSourceTemplate(event.target.value); setDownloadError(null); }} placeholder="https://你的加速服务/{url}" autoComplete="off" spellCheck={false} />
-                    </Field>}
-                    <p className="leading-relaxed">官方 API 限流时自动改用官方发布页查询版本。加速源请使用你信任的 HTTPS 服务；校验值始终来自 GitHub 官方，校验失败不会使用，也不会发送 GitHub 授权凭据。实际速度取决于服务和网络。</p>
-                  </fieldset>
-                </details>
-                {downloadError && <p role="alert" className="mt-2 text-xs text-bad">{downloadError}</p>}
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <Button variant="outline" size="sm" disabled={downloading} onClick={startDownload}><Download className="size-4" />{download?.status === "error" ? "重新下载所选包" : "下载所选包"}</Button>
-                  <Button variant="ghost" size="sm" onClick={() => store.send({ type: "import-package" })}><FolderInput className="size-4" />导入已有包</Button>
-                </div>
-                <p className="mt-2 text-xs text-muted-foreground">本批共用一个分发包，仅下载一次，分别解包到独立目录。</p>
-                {download && <div className="mt-3 space-y-2">
-                  {downloading && <Progress value={download.pct} aria-label="分发包下载进度" />}
-                  <p role="status" className={`break-words text-xs ${download.status === "error" ? "text-bad" : "text-muted-foreground"}`}>{downloading ? `${download.pct}% · ` : ""}{download.message}</p>
-                  {download.network && <p className="break-words text-xs text-muted-foreground">连接：{download.network}</p>}
-                  {download.source && <p className="break-words text-xs text-muted-foreground">下载源：{download.source}</p>}
-                  {downloading && <div className="flex flex-wrap gap-2">
-                    {download.status === "running" && <Button variant="outline" size="sm" onClick={() => store.send({ type: "pause-download" })}><Pause className="size-4" />暂停下载</Button>}
-                    {download.status === "paused" && <Button variant="outline" size="sm" onClick={() => store.send({ type: "resume-download" })}><Play className="size-4" />继续下载</Button>}
-                    <Button variant="ghost" size="sm" disabled={download.status === "cancelling"} onClick={() => store.send({ type: "cancel-download" })}><Square className="size-4" />{download.status === "cancelling" ? "正在取消…" : "取消下载"}</Button>
-                  </div>}
-                  {downloading && <p className="text-xs text-muted-foreground">关闭此面板不会停止下载；退出应用会取消并清理未完成文件。</p>}
-                </div>}
               </section>
               <section aria-labelledby={`${id}-method`}>
                 <h3 id={`${id}-method`} className="mb-3 text-sm font-semibold">授权方式</h3>
@@ -305,7 +181,7 @@ export function RegisterDialog({ open, onOpenChange, summary }: {
         <DialogFooter className="flex-row flex-wrap items-center justify-between gap-3 border-t border-border px-6 py-4">
           {stage === "configure" ? <>
             <Button variant="ghost" onClick={() => onOpenChange(false)}>取消</Button>
-            <Button disabled={downloading || busy} onClick={submit}>{method === "github" ? "继续：手机授权" : `创建 ${runners.length} 个 runner`}</Button>
+            <Button disabled={downloading || busy || !selectedPkg} onClick={submit}>{method === "github" ? "继续：手机授权" : `创建 ${runners.length} 个 runner`}</Button>
           </> : busy ? <>
             <span className="text-xs text-muted-foreground">{waiting ? "完成授权后自动继续，无需点击下一步" : "创建期间请勿退出应用"}</span>
             {cancellable && <Button variant="outline" onClick={() => store.send({ type: "cancel-authorization" })}>取消授权</Button>}
