@@ -72,6 +72,16 @@
    `packageRoot`（入口文件的上一级，本包 manifest 恒有 name；0.36.0 实现首选读取该显式
    身份、类型未声明，窄断言 + 注释）。该身份决定 `~/.opentray/apps/<encoded-name>/` 的
    稳定 bundle 路径，显式传入与既有解析结果一致，老安装不受影响。
+10. **opentray 残留 broker 状态（2026-11-01 Windows 启动失败，已上游修复）**：opentray
+    0.36.0 用 `ready.json` + `broker.pid` 判 broker 是否在跑，存活探测只有
+    `process.kill(pid, 0)`。broker 在最后一个会话关闭时退出却不删这两个文件；Windows
+    快速复用 PID，残留 PID 落到 svchost 后 SDK 误判 already-running、跳过拉起，连接
+    命名管道即 `connect ENOENT \\.\pipe\opentray-...`；升级导致 npx 缓存路径变化时
+    还会直接 SIGTERM 那个被复用的 PID。修复已落在上游 `opentray@0.36.1`：复用/停止/
+    报告前用 PowerShell `Get-Process`（Windows）、`/proc`（Linux）或 `ps`（macOS）
+    核对 PID 的真实可执行文件与 `ready.json` 一致，端点缺失时客户端重启一次。
+    gh-runner 依赖 `^0.36.1` 即可，不再保留应用层兜底代码；回归锁在 opentray 的
+    `daemon/lifecycle.test.ts` 与 `local-broker.test.ts`。
 
 ## 文件意图
 
