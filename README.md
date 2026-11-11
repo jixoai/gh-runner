@@ -1,10 +1,28 @@
 # @jixoai/gh-runner
 
-菜单栏（托盘）工具：在一台 Mac 或 Windows 机器上管理多台 GitHub Actions self-hosted runner——
+菜单栏（托盘）工具：在一台 Mac 或 Windows 机器上管理多台 GitHub Actions self-hosted runner；Linux 服务器提供无头交互式 CLI——
 自动发现、表单注册（**下载官方最新包 / 导入本地包**）、一键启动/关闭、按运行日志实时分析最近一个
 作业（动作）的成功/失败。
 
 基于 [opentray](https://github.com/jixoai/opentray)（托盘 + appMode WebView 窗口 + 原生对话框）。
+
+### Linux 服务器 CLI
+
+Linux 上运行 `gh-runner` 默认进入交互菜单，不加载桌面 GUI。首次选择注册后，按提示输入组织/仓库地址、runner 数量、名称、目录和 labels；随后可选 GitHub 手机/浏览器 Device Flow，或在不回显的提示中输入短期 runner registration token（不能使用 PAT）。程序自动下载并校验本机架构对应的官方 Runner 包，完成解包、注册并启动。
+
+```bash
+npx @jixoai/gh-runner                 # Linux 默认交互菜单
+gh-runner register                    # 交互式批量注册（1–10 个）
+gh-runner list                        # 列出实例、状态、自启动和目录
+gh-runner list --json                 # JSON 输出，便于脚本消费
+gh-runner start <名称或ID>
+gh-runner stop <名称或ID>
+gh-runner remove <名称或ID>           # 交互认证后从 GitHub 注销；本地文件默认保留
+gh-runner autostart enable <名称或ID> # 安装 systemd --user 服务并立即启动
+gh-runner autostart disable <名称或ID>
+```
+
+`remove` 可选择同时删除 runner 与 Work 目录；该操作不可恢复，需要明确输入 `yes`。自启动使用当前用户的 systemd 服务；若要求用户退出登录后仍在开机时启动，需要管理员为该账号启用 lingering：`sudo loginctl enable-linger <用户名>`。Linux 配置默认位于 `${XDG_CONFIG_HOME:-~/.config}/gh-runner`。`list`、`start`、`stop` 和 `autostart` 可直接用于脚本；注册与注销会交互认证。Token 不接受命令行参数，避免泄露到 shell 历史和进程列表。
 
 ## 使用
 

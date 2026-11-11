@@ -19,6 +19,10 @@ export function configDir(): string {
     const appData = process.env.APPDATA ?? join(homedir(), "AppData", "Roaming");
     return join(appData, "gh-runner");
   }
+  if (process.platform === "linux") {
+    const xdgConfigHome = process.env.XDG_CONFIG_HOME;
+    return join(xdgConfigHome?.startsWith("/") ? xdgConfigHome : join(homedir(), ".config"), "gh-runner");
+  }
   return join(homedir(), "Library", "Application Support", "gh-runner");
 }
 

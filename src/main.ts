@@ -11,14 +11,9 @@
 import { stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createTray, type OpenTrayRuntimeOptions } from "opentray";
-import { attachDialog } from "@opentray/ext-dialog";
-import { attachOpener } from "@opentray/ext-opener";
+import type { OpenTrayRuntimeOptions, CreateTrayHandle } from "opentray";
 import { configDir } from "./config.ts";
 import { Fleet } from "./fleet.ts";
-import { TrayProjection } from "./tray.ts";
-import { UiHost, extendWebview } from "./window.ts";
-import { appIcon } from "./branding.ts";
 import { APP_VERSION } from "./version.ts";
 import { AppLifecycle } from "./lifecycle.ts";
 
@@ -32,8 +27,9 @@ const APP_ID = "com.jixoai.gh-runner";
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** 导入本地分发包：系统文件选择器（ext-dialog；darwin NSOpenPanel / win32 对话框）。 */
-async function pickPackageFile(tray: Awaited<ReturnType<typeof createTray>>): Promise<string | null> {
+async function pickPackageFile(tray: CreateTrayHandle): Promise<string | null> {
   try {
+    const { attachDialog } = await import("@opentray/ext-dialog");
     const dialog = attachDialog(tray);
     const picked = await dialog.pickFile({
       filters: [{ name: "runner 包", extensions: ["gz", "zip"] }],
@@ -56,6 +52,10 @@ let reportPickerFailure: (what: string, err: unknown, hint?: string) => void = (
 /** --probe：探明真实窗口里注入的页面桥形态。三通道取证：页面 ipc 上行 / 宿主 evaluate 内省 +
  *  titlechange 回传 / loadstate 时机观测。 */
 async function runProbe(): Promise<void> {
+  const [{ createTray }, { extendWebview }] = await Promise.all([
+    import("opentray"),
+    import("./window.ts"),
+  ]);
   const tray = await createTray(
     { id: APP_ID, icon: { "text-only": "probe" } },
     { appId: APP_ID, appName: "GH Runner Probe", recovery: { enabled: false } },
@@ -122,7 +122,7 @@ async function runProbe(): Promise<void> {
   await finish();
 }
 
-async function runSmoke(uiHost: UiHost, shutdown: () => Promise<void>): Promise<void> {
+async function runSmoke(uiHost: import("./window.ts").UiHost, shutdown: () => Promise<void>): Promise<void> {
   await uiHost.open();
   const deadline = Date.now() + 30_000;
   while (Date.now() < deadline && uiHost.ackedSeq === 0) {
@@ -169,6 +169,13 @@ async function runSmoke(uiHost: UiHost, shutdown: () => Promise<void>): Promise<
 
 async function main(): Promise<void> {
   const mode = process.argv[2] ?? "";
+  const cliCommands = new Set(["cli", "help", "--help", "-h", "list", "ls", "register", "start", "stop", "remove", "unregister", "autostart"]);
+  if ((process.platform === "linux" && !["--dry-run", "--smoke", "--probe"].includes(mode)) || cliCommands.has(mode)) {
+    const { runCli } = await import("./cli.ts");
+    const args = mode === "cli" ? process.argv.slice(3) : process.argv.slice(2);
+    await runCli(args);
+    return;
+  }
   if (mode === "--probe") {
     await runProbe();
     return;
@@ -208,6 +215,14 @@ async function main(): Promise<void> {
     return;
   }
 
+  const [{ createTray }, { attachDialog }, { attachOpener }, { TrayProjection }, { UiHost, extendWebview }, { appIcon }] = await Promise.all([
+    import("opentray"),
+    import("@opentray/ext-dialog"),
+    import("@opentray/ext-opener"),
+    import("./tray.ts"),
+    import("./window.ts"),
+    import("./branding.ts"),
+  ]);
   const tray = await createTray(
     {
       id: APP_ID,
