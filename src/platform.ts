@@ -59,11 +59,10 @@ export function unregisterSpawn(dir: string, platform: NodeJS.Platform = PLATFOR
   return { file: "./config.sh", prefixArgs: ["remove"] };
 }
 
-/** labels 默认值（UI 预填）。 */
-export function defaultLabels(): string {
-  if (PLATFORM === "darwin") return "self-hosted,macOS,ARM64";
-  if (IS_WIN) return `self-hosted,Windows,${archSegment().toUpperCase()}`;
-  return `self-hosted,Linux,${archSegment().toUpperCase()}`;
+/** 注册时附加当前主机平台和架构标签。 */
+export function defaultLabels(p: NodeJS.Platform = PLATFORM, a: string = ARCH): string {
+  const osLabel = p === "darwin" ? "macOS" : p === "win32" ? "Windows" : "Linux";
+  return `self-hosted,${osLabel},${archSegment(a).toUpperCase()}`;
 }
 
 /** 实例目录的默认父目录（UI placeholder 与初始 searchDirs）。 */

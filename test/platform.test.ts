@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assetNameFor, packageCompatible, osSegment, archSegment, basenameOf, isAbsolutePath } from "../src/platform.ts";
+import { assetNameFor, packageCompatible, osSegment, archSegment, basenameOf, defaultLabels, isAbsolutePath } from "../src/platform.ts";
 import { listPackages } from "../src/packages.ts";
 
 const isolated = vi.hoisted(() => ({ root: "" }));
@@ -26,6 +26,14 @@ describe("platform 资产名映射", () => {
   it("linux/arm64 → linux-arm64 tar.gz；ia32 → x86", () => {
     expect(assetNameFor("2.339.0", "linux", "arm64")).toBe("actions-runner-linux-arm64-2.339.0.tar.gz");
     expect(assetNameFor("2.339.0", "linux", "ia32")).toBe("actions-runner-linux-x86-2.339.0.tar.gz");
+  });
+  it.each([
+    ["darwin", "x64", "self-hosted,macOS,X64"],
+    ["darwin", "arm64", "self-hosted,macOS,ARM64"],
+    ["win32", "arm64", "self-hosted,Windows,ARM64"],
+    ["linux", "x64", "self-hosted,Linux,X64"],
+  ] as const)("默认 labels 跟随 %s/%s 架构", (platform, architecture, expected) => {
+    expect(defaultLabels(platform, architecture)).toBe(expected);
   });
   it("兼容性判定按当前平台", () => {
     const self = `${osSegment()}-${archSegment()}`;
