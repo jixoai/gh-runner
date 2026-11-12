@@ -1,17 +1,35 @@
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
-import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { homedir, hostname } from "node:os";
 import { join, resolve } from "node:path";
-import { execFile as execFileCallback } from "node:child_process";
-import { promisify } from "node:util";
+import QRCode from "qrcode";
 import { Fleet } from "./fleet.ts";
 import { githubClientId } from "./github-auth.ts";
 import { parseRunnerTarget } from "./github-target.ts";
-import { defaultLabels } from "./platform.ts";
+import { ARCH, defaultLabels, PLATFORM } from "./platform.ts";
 
-const execFile = promisify(execFileCallback);
 const NAME_RE = /^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*$/;
+const PLATFORM_NAMES: Record<string, string> = {
+  darwin: "macOS",
+  linux: "Linux",
+  win32: "Windows",
+};
+
+export function formatHostPlatform(platform: string = PLATFORM, arch: string = ARCH): string {
+  return `${PLATFORM_NAMES[platform] ?? platform} · ${arch.toUpperCase()}`;
+}
+
+export async function formatDeviceAuthorization(uri: string, userCode: string): Promise<string> {
+  const qr = await QRCode.toString(uri, { type: "terminal", small: true });
+  return [
+    "┌─ GitHub 设备授权 ───────────────────────────────",
+    qr,
+    `│ 扫码后输入验证码：${userCode}`,
+    `│ 或手动打开：${uri}`,
+    "│ 等待 GitHub 确认…",
+    "└────────────────────────────────────────────────",
+  ].join("\n");
+}
 
 function help(): void {
   console.log(`GH Runner CLI
@@ -26,8 +44,8 @@ Commands:
   start <name|id>              Start a runner
   stop <name|id>               Stop a runner
   remove <name|id>             Unregister a runner from GitHub
-  autostart enable <name|id>   Install and enable a systemd user service
-  autostart disable <name|id>  Disable and remove its systemd user service
+  autostart enable <name|id>   Auto-start runner when GH Runner launches
+  autostart disable <name|id>  Disable auto-start when GH Runner launches
 
 Registration supports GitHub device authorization (phone/browser) or a short-lived
 runner registration token entered interactively. Do not pass tokens as arguments.`);
@@ -125,29 +143,40 @@ async function registerInteractive(fleet: Fleet): Promise<void> {
     runners.push({ name, dir, workFolder, labels });
   }
 
-  console.log("\n正在下载当前 Linux 平台适配的官方 Runner 包…");
+  console.log(`\n[1/3] 下载 ${formatHostPlatform()} Runner 安装包`);
   const done = fleet.downloadLatest();
-  let last = "";
+  let lastProgress = "";
+  let lastNonTtyProgress = "";
   const stop = fleet.onSnapshot((snapshot) => {
     const state = snapshot.download;
     if (!state) return;
-    const line = `${state.status}: ${state.message}${state.pct ? ` (${state.pct}%)` : ""}`;
-    if (line !== last) {
-      console.log(line);
-      last = line;
+    const line = `${state.message}${state.status === "running" ? ` · ${state.pct}%` : ""}`;
+    if (stdout.isTTY) {
+      if (line !== lastProgress) stdout.write(`\r\x1b[2K${line}`);
+      lastProgress = line;
+    } else {
+      const bucket = Math.floor(state.pct / 10) * 10;
+      const key = `${state.status}:${state.message}:${bucket}`;
+      if (key !== lastNonTtyProgress) {
+        console.log(`  ${line}`);
+        lastNonTtyProgress = key;
+      }
     }
   });
   try {
     await done;
   } finally {
     stop();
+    if (stdout.isTTY && lastProgress) stdout.write("\r\x1b[2K");
   }
   const downloadState = fleet.snapshot().download;
   if (downloadState?.status !== "ok") throw new Error(downloadState?.message || "官方 Runner 包下载失败");
   const packagePath = fleet.snapshot().packages.find((item) => item.compatible)?.path;
   if (!packagePath) throw new Error("官方 Runner 包下载失败或没有生成可用包");
+  console.log(`  ✓ 安装包就绪：${packagePath.split(/[\\/]/).pop()}`);
 
   const method = (await ask("授权方式：1) 手机/浏览器 GitHub 授权  2) 输入 runner 注册 Token", "1")) === "2" ? "token" : "github";
+  if (method === "token") console.log("\n[2/3] 输入短期 Runner registration token");
   const token = method === "token" ? await askSecret("输入短期 runner registration token（非 PAT）") : "";
   const input = {
     method,
@@ -157,24 +186,34 @@ async function registerInteractive(fleet: Fleet): Promise<void> {
     packagePath,
     runners,
   } as const;
+  if (method === "token") console.log("\n[3/3] 正在配置 Runner");
   let previousCode = "";
-  let previousMessage = "";
+  let previousAuthorizationStatus = "";
+  const previousItemLines = new Map<string, string>();
+  let authorizationPanelPending = false;
   const stopProgress = fleet.onSnapshot((snapshot) => {
     const auth = snapshot.authorization;
-    if (auth?.userCode && auth.userCode !== previousCode) {
+    if (auth?.userCode && auth.userCode !== previousCode && !authorizationPanelPending) {
       previousCode = auth.userCode;
-      console.log(`\n请在手机或浏览器打开 ${auth.verificationUri} 并输入验证码：${auth.userCode}`);
+      authorizationPanelPending = true;
+      void formatDeviceAuthorization(auth.verificationUri ?? "https://github.com/login/device", auth.userCode)
+        .then((panel) => console.log(`\n[2/3] GitHub 授权\n${panel}`))
+        .catch(() => console.log(`\n[2/3] GitHub 授权：打开 ${auth.verificationUri} 并输入验证码 ${auth.userCode}`))
+        .finally(() => { authorizationPanelPending = false; });
     }
-    const message = snapshot.task.message;
-    if (message && message !== previousMessage) {
-      previousMessage = message;
-      console.log(message);
+    if (auth?.status && auth.status !== previousAuthorizationStatus) {
+      previousAuthorizationStatus = auth.status;
+      if (auth.status === "requesting") console.log("\n[2/3] 正在申请 GitHub 设备授权…");
+      if (auth.status === "exchanging") console.log("  ✓ 已确认，正在申请 Runner 注册凭据…");
+      if (auth.status === "registering") console.log("\n[3/3] 正在配置 Runner");
     }
     for (const item of snapshot.registrationBatch?.items ?? []) {
+      if (item.status === "pending") continue;
       const line = `${item.name}: ${item.status} — ${item.message}`;
-      if (line !== previousMessage) {
-        console.log(line);
-        previousMessage = line;
+      if (line !== previousItemLines.get(item.name)) {
+        const icon = item.status === "ok" ? "✓" : item.status === "error" ? "✗" : "·";
+        console.log(`  ${icon} ${line}`);
+        previousItemLines.set(item.name, line);
       }
     }
   });
@@ -186,7 +225,7 @@ async function registerInteractive(fleet: Fleet): Promise<void> {
   const result = fleet.snapshot().registrationBatch;
   if (result?.items.some((item) => item.status === "error")) process.exitCode = 1;
   const registered = result?.items.filter((item) => item.status === "ok") ?? [];
-  if (process.platform === "linux" && registered.length > 0 && (await ask("将成功注册的 runner 配置为 systemd 开机自启动？", "no")).toLowerCase() === "yes") {
+  if (registered.length > 0 && (await ask("GH Runner 启动时自动启动这些 runner？", "no")).toLowerCase() === "yes") {
     for (const item of registered) {
       try {
         await configureAutostart(fleet, item.dir, true);
@@ -198,79 +237,53 @@ async function registerInteractive(fleet: Fleet): Promise<void> {
   }
 }
 
-function systemdUnitName(id: string): string {
-  return `gh-runner-${id.replace(/[^a-zA-Z0-9_.-]/g, "-")}.service`;
-}
-
-function systemdEscape(value: string): string {
-  return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%").replaceAll(/\$/g, () => "$$")}"`;
-}
-
-export function renderSystemdUnit(dir: string): string {
-  return `[Unit]\nDescription=GitHub Actions runner managed by GH Runner (${dir})\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=simple\nWorkingDirectory=${systemdEscape(dir)}\nExecStart=/bin/bash ${systemdEscape(join(dir, "run.sh"))}\nRestart=always\nRestartSec=5\nKillMode=mixed\nTimeoutStopSec=60\n\n[Install]\nWantedBy=default.target\n`;
-}
-
 async function configureAutostart(fleet: Fleet, selector: string, enable: boolean): Promise<void> {
-  if (process.platform !== "linux") throw new Error("systemd 自启动命令仅支持 Linux");
   const runner = findRunner(fleet, selector);
   if (!runner.configured) throw new Error("Runner 尚未注册，无法配置自启动");
-  const unit = systemdUnitName(runner.id);
-  const unitDir = join(process.env.XDG_CONFIG_HOME?.startsWith("/") ? process.env.XDG_CONFIG_HOME : join(homedir(), ".config"), "systemd", "user");
-  await mkdir(unitDir, { recursive: true, mode: 0o700 });
-  if (enable) {
-    if (runner.processState === "running" || runner.processState === "starting") {
-      await fleet.stop(runner.id);
-      const stopped = fleet.view(runner.id);
-      if (stopped?.processState === "running" || stopped?.processState === "starting" || stopped?.processState === "stopping") {
-        throw new Error("Runner 尚未停止，未切换到 systemd 管理；请稍后重试");
-      }
-    }
-    await writeFile(join(unitDir, unit), renderSystemdUnit(runner.dir), { mode: 0o600 });
-    await execFile("systemctl", ["--user", "daemon-reload"]);
-    await execFile("systemctl", ["--user", "enable", "--now", unit]);
-    await fleet.setAutoStart(runner.id, true);
-    console.log(`已启用 ${unit}。若需退出登录后仍在开机时启动，请管理员执行：sudo loginctl enable-linger ${process.env.USER ?? "<username>"}`);
-  } else {
-    if (await access(join(unitDir, unit)).then(() => true, () => false)) {
-      await execFile("systemctl", ["--user", "disable", "--now", unit]);
-    }
-    await rm(join(unitDir, unit), { force: true });
-    await execFile("systemctl", ["--user", "daemon-reload"]);
-    await fleet.setAutoStart(runner.id, false);
-    console.log(`已停用 ${unit}`);
-  }
-}
-
-async function serviceIsInstalled(id: string): Promise<boolean> {
-  const dir = process.env.XDG_CONFIG_HOME?.startsWith("/") ? process.env.XDG_CONFIG_HOME : join(homedir(), ".config");
-  return access(join(dir, "systemd", "user", systemdUnitName(id))).then(() => true, () => false);
+  await fleet.setAutoStart(runner.id, enable);
+  console.log(enable
+    ? `已启用 ${runner.name}：下次启动 GH Runner 时自动启动此 Runner。`
+    : `已停用 ${runner.name} 的自动启动。`);
 }
 
 async function runAction(fleet: Fleet, id: string, action: "start" | "stop"): Promise<void> {
-  if (process.platform === "linux" && await serviceIsInstalled(id)) {
-    await execFile("systemctl", ["--user", action, systemdUnitName(id)]);
-  } else {
-    await (action === "start" ? fleet.start(id) : fleet.stop(id));
-  }
+  await (action === "start" ? fleet.start(id) : fleet.stop(id));
 }
 
 async function removeRunner(fleet: Fleet, selector: string): Promise<void> {
   const runner = findRunner(fleet, selector);
   if (runner.currentJob) throw new Error("Runner 正在执行作业，请等作业结束后再注销");
-  if (await serviceIsInstalled(runner.id)) {
-    await configureAutostart(fleet, selector, false);
-  }
+  if (runner.autoStart) await configureAutostart(fleet, selector, false);
   if (runner.processState === "running" || runner.processState === "starting") {
     const answer = await ask(`Runner 当前正在运行。先停止再注销？输入 yes 确认`);
     if (answer.toLowerCase() !== "yes") return;
     await fleet.stop(runner.id);
   }
   const method = (await ask("注销授权方式：1) GitHub 手机/浏览器授权  2) 输入 remove token", "1")) === "2" ? "token" : "github";
+  console.log(method === "token" ? "\n[2/3] 输入短期 Runner remove token" : "\n[2/3] 请求 GitHub 注销授权");
   const token = method === "token" ? await askSecret("输入短期 runner remove token（非 PAT）") : "";
   const deleteFiles = (await ask("注销后同时删除本地 runner 和 Work 文件？（不可恢复）输入 yes 确认", "no")).toLowerCase() === "yes";
+  if (method === "token") console.log("\n[3/3] 正在注销 Runner");
+  let previousCode = "";
+  let previousMessage = "";
+  let unregisterStarted = method === "token";
   const stopProgress = fleet.onSnapshot((snapshot) => {
+    const auth = snapshot.authorization;
+    if (auth?.status === "registering" && !unregisterStarted) {
+      unregisterStarted = true;
+      console.log("\n[3/3] 正在注销 Runner");
+    }
+    if (auth?.userCode && auth.userCode !== previousCode) {
+      previousCode = auth.userCode;
+      void formatDeviceAuthorization(auth.verificationUri ?? "https://github.com/login/device", auth.userCode)
+        .then((panel) => console.log(`\n${panel}`))
+        .catch(() => console.log(`\n打开 ${auth.verificationUri} 并输入验证码 ${auth.userCode}`));
+    }
     const state = snapshot.runnerOperation;
-    if (state?.id === runner.id) console.log(state.message);
+    if (state?.id === runner.id && state.message !== previousMessage) {
+      console.log(`  · ${state.message}`);
+      previousMessage = state.message;
+    }
   });
   try {
     await fleet.operateRunner({ requestId: `cli-${Date.now()}`, id: runner.id, action: "unregister", method, token, deleteLocalFiles: deleteFiles });
