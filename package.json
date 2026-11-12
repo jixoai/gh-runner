@@ -1,6 +1,6 @@
 {
   "name": "@jixoai/gh-runner",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "description": "Manage multiple GitHub Actions self-hosted runners with a macOS/Windows tray app or Linux headless CLI: discover, register, start/stop, and analyze job results.",
   "type": "module",
   "license": "MIT",
