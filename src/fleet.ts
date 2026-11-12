@@ -73,6 +73,10 @@ function pathsOverlap(first: string, second: string): boolean {
   return first === second || first.startsWith(`${second}/`) || second.startsWith(`${first}/`);
 }
 
+function pathContains(parent: string, child: string): boolean {
+  return child === parent || child.startsWith(`${parent}/`);
+}
+
 export interface BootOptions {
   /** 启动时自动拉起 autoStart 实例；--dry-run/--smoke 等验证模式必须传 false（保持无副作用）。 */
   autoStart?: boolean;
@@ -584,18 +588,41 @@ export class Fleet {
       if (!existsSync(entryPath)) throw new Error("安装文件已缺失，请重新下载分发包并添加实例；工作文件可继续保留");
       const target = parseRunnerTarget(rt.meta.gitHubUrl ?? "");
       const originalDir = await realpath(rt.dir);
+      const workFolder = rt.meta.workFolder ? resolve(rt.dir, rt.meta.workFolder) : "";
       if (removing && input.deleteLocalFiles === true) {
-        const protectedDirs = [homedir(), process.cwd(), configDir(), ...[...this.#rts.values()].filter((item) => item.id !== rt.id).map((item) => item.dir)];
+        const canonicalRunner = await canonicalRegistrationPath(originalDir);
+        const protectedDirs = await Promise.all([homedir(), process.cwd(), configDir()].map(canonicalRegistrationPath));
+        const otherRunnerDirs = await Promise.all([...this.#rts.values()].filter((item) => item.id !== rt.id).map((item) => canonicalRegistrationPath(item.dir)));
         for (const path of protectedDirs) {
-          const canonical = await realpath(path).catch(() => resolve(path));
-          const nested = relative(originalDir, canonical);
-          if (nested === "" || (!isAbsolute(nested) && nested !== ".." && !nested.startsWith(`..${PLATFORM === "win32" ? "\\" : "/"}`))) {
-            throw new Error("实例目录包含用户目录、应用目录或其他实例，不能自动清理；请取消勾选后注销并手动检查文件");
+          if (pathContains(canonicalRunner, path)) {
+            throw new Error("实例目录包含用户目录或应用目录，不能自动清理；请取消勾选后注销并手动检查文件");
+          }
+        }
+        for (const path of otherRunnerDirs) {
+          if (pathContains(canonicalRunner, path)) {
+            throw new Error("实例目录包含其他实例，不能自动清理；请取消勾选后注销并手动检查文件");
+          }
+        }
+        if (workFolder) {
+          const canonicalWork = await canonicalRegistrationPath(workFolder);
+          if (!pathContains(canonicalRunner, canonicalWork)) {
+            if (pathsOverlap(canonicalWork, canonicalRunner)) {
+              throw new Error("Work 目录包含 Runner 实例目录，不能自动清理；请取消勾选后注销并手动检查文件");
+            }
+            for (const path of protectedDirs) {
+              if (pathContains(canonicalWork, path)) {
+                throw new Error("Work 目录包含用户目录或应用目录，不能自动清理；请取消勾选后注销并手动检查文件");
+              }
+            }
+            for (const path of otherRunnerDirs) {
+              if (pathsOverlap(canonicalWork, path)) {
+                throw new Error("Work 目录与其他 Runner 实例重叠，不能自动清理；请取消勾选后注销并手动检查文件");
+              }
+            }
           }
         }
       }
       const originalAgentId = rt.meta.agentId;
-      const workFolder = rt.meta.workFolder ? resolve(rt.dir, rt.meta.workFolder) : "";
       if (!workFolder) throw new Error("实例缺少工作目录配置，请先检查 .runner");
       const retained = { name: rt.meta.agentName ?? rt.id, targetUrl: target.url, workFolder };
       if (input.method === "github") {
@@ -666,6 +693,9 @@ export class Fleet {
           throw new Error("实例目录或注册配置发生变化，已取消文件清理，请手动检查");
         }
         rt.tail?.stop();
+        if (workFolder && !pathContains(await canonicalRegistrationPath(originalDir), await canonicalRegistrationPath(workFolder))) {
+          await rm(workFolder, { recursive: true, force: true });
+        }
         await rm(rt.dir, { recursive: true });
         this.#rts.delete(rt.id);
         this.#config = { ...this.#config, instances: this.#config.instances.filter((item) => item.id !== rt.id) };
@@ -673,7 +703,7 @@ export class Fleet {
       }
       this.#runnerOperation.status = "ok";
       this.#runnerOperation.message = removing
-        ? input.deleteLocalFiles === true ? "已从 GitHub 注销并删除本地实例目录；目录外的工作文件不受影响" : "已从 GitHub 注销；本地安装包、工作文件和日志已保留"
+        ? input.deleteLocalFiles === true ? "已从 GitHub 注销并删除本地 Runner 与 Work 目录" : "已从 GitHub 注销；本地安装包、工作文件和日志已保留"
         : "已重新注册；工作文件保持不变，可点击启动";
       this.#task = { kind: input.action, status: "ok", message: this.#runnerOperation.message };
       this.#authorization = { status: "cleared", message: "本次临时凭据已清理" };

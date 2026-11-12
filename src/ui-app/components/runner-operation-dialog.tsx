@@ -58,10 +58,10 @@ export function RunnerOperationDialog({ inst, summary, onClose }: { inst: Instan
         <div><dt className="text-xs text-muted-foreground">工作目录</dt><dd className="break-all select-text">{inst.workFolder || "未记录"}</dd></div>
       </dl>
       {!busy && !finished && <>
-        <p className="text-sm text-muted-foreground">{removing ? confirming ? "不勾选也会完成注销，只保留本地文件，方便以后重新注册。取消则不会修改 runner。" : deleteLocalFiles ? "已选择：注销成功后清理本地实例目录，目录外的工作文件不受影响。" : "已选择：注销后保留本地文件，可随时重新注册。" : "重新注册完成后保持停止状态，由你决定何时启动。若删除了安装文件，需要重新下载分发包。"}</p>
+        <p className="text-sm text-muted-foreground">{removing ? confirming ? "不勾选也会完成注销，只保留本地文件，方便以后重新注册。取消则不会修改 runner。" : deleteLocalFiles ? "已选择：注销成功后清理本地 Runner 与 Work 目录。" : "已选择：注销后保留本地文件，可随时重新注册。" : "重新注册完成后保持停止状态，由你决定何时启动。若删除了安装文件，需要重新下载分发包。"}</p>
         {confirming && <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 text-sm has-[:disabled]:cursor-not-allowed">
           <input type="checkbox" className="mt-1 size-4 shrink-0 accent-primary" checked={deleteLocalFiles} disabled={blocked} onChange={(event) => setDeleteLocalFiles(event.target.checked)} aria-describedby="runner-cleanup-description" />
-          <span><span className="font-medium">同时清理本地实例文件</span><span id="runner-cleanup-description" className={`mt-1 block text-xs ${deleteLocalFiles ? "text-bad" : "text-muted-foreground"}`}>{deleteLocalFiles ? "注销成功后永久删除上方实例目录，包括运行程序、目录内的工作文件和日志，无法撤销。目录外的工作文件不会删除。" : "默认保留运行程序、工作文件和日志，方便以后重新注册。"}</span></span>
+          <span><span className="font-medium">同时清理本地实例文件</span><span id="runner-cleanup-description" className={`mt-1 block text-xs ${deleteLocalFiles ? "text-bad" : "text-muted-foreground"}`}>{deleteLocalFiles ? "注销成功后永久删除实例目录和单独配置的 Work 目录，包括运行程序、缓存和日志，无法撤销。与用户目录或其他 Runner 重叠时会拒绝自动清理。" : "默认保留运行程序、工作文件和日志，方便以后重新注册。"}</span></span>
         </label>}
         {blocked && <p role="alert" className="text-sm text-bad">{current.currentJob ? "请等待当前作业完成后再操作。" : current.external ? "请先停止外部终端或系统服务中的 runner。" : "有任务正在执行或实例正在切换状态，请稍后重试。"}</p>}
         {!confirming && <fieldset className="space-y-3" disabled={blocked}>

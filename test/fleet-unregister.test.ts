@@ -109,7 +109,7 @@ describe("注销及原目录复用", () => {
     });
     await fleet.operateRunner({ ...input(), deleteLocalFiles: true });
     expect(unregisterRunner).toHaveBeenCalledOnce();
-    expect(fleet.snapshot().runnerOperation).toMatchObject({ status: "ok", message: expect.stringContaining("删除本地实例目录") });
+    expect(fleet.snapshot().runnerOperation).toMatchObject({ status: "ok", message: expect.stringContaining("删除本地 Runner 与 Work 目录") });
     await expect(realpath(dir)).rejects.toMatchObject({ code: "ENOENT" });
     expect(fleet.view(instanceIdOf(dir))).toBeNull();
     expect(config.instances).toEqual([]);
@@ -140,7 +140,7 @@ describe("注销及原目录复用", () => {
     expect(await readFile(join(dir, "_work", "keep.txt"), "utf8")).toBe("WORK");
   });
 
-  it("不会递归删除实例目录外的工作文件", async () => {
+  it("勾选清理时会删除实例目录外单独配置的 Work 目录", async () => {
     const externalWork = await mkdtemp(join(tmpdir(), "rf-external-work-"));
     try {
       await writeFile(join(externalWork, "keep.txt"), "EXTERNAL");
@@ -150,7 +150,7 @@ describe("注销及原目录复用", () => {
       await fleet.boot({ autoStart: false });
       await fleet.operateRunner({ ...input(), deleteLocalFiles: true });
       expect(fleet.snapshot().runnerOperation?.status).toBe("ok");
-      expect(await readFile(join(externalWork, "keep.txt"), "utf8")).toBe("EXTERNAL");
+      await expect(realpath(externalWork)).rejects.toMatchObject({ code: "ENOENT" });
     } finally { await rm(externalWork, { recursive: true, force: true }); }
   });
 

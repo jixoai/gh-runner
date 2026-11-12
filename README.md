@@ -6,23 +6,24 @@
 
 基于 [opentray](https://github.com/jixoai/opentray)（托盘 + appMode WebView 窗口 + 原生对话框）。
 
-### Linux 服务器 CLI
+### 跨平台 CLI（Linux 服务器默认无 GUI）
 
-Linux 上运行 `gh-runner` 默认进入交互菜单，不加载桌面 GUI。首次选择注册后，按提示输入组织/仓库地址、runner 数量、名称、目录和 labels；随后可选 GitHub 手机/浏览器 Device Flow，或在不回显的提示中输入短期 runner registration token（不能使用 PAT）。程序自动下载并校验本机架构对应的官方 Runner 包，完成解包、注册并启动。
+Linux 上运行 `gh-runner` 默认进入交互菜单，不加载桌面 GUI；macOS / Windows 可通过显式 CLI 命令使用同一套流程。注册时按提示输入组织/仓库地址、runner 数量、名称、目录和 labels；程序根据当前操作系统与架构下载对应的官方 Runner 包。GitHub Device Flow 会在终端显示可扫码二维码，同时保留手动输入验证码的方式；也可选择在不回显的提示中输入短期 runner registration token（不能使用 PAT）。完成后自动配置并启动 Runner。
 
 ```bash
 npx @jixoai/gh-runner                 # Linux 默认交互菜单
+npx @jixoai/gh-runner register        # macOS / Windows 显式启动注册 CLI
 gh-runner register                    # 交互式批量注册（1–10 个）
 gh-runner list                        # 列出实例、状态、自启动和目录
 gh-runner list --json                 # JSON 输出，便于脚本消费
 gh-runner start <名称或ID>
 gh-runner stop <名称或ID>
 gh-runner remove <名称或ID>           # 交互认证后从 GitHub 注销；本地文件默认保留
-gh-runner autostart enable <名称或ID> # 安装 systemd --user 服务并立即启动
+gh-runner autostart enable <名称或ID> # GH Runner 下次启动时自动启动该 Runner
 gh-runner autostart disable <名称或ID>
 ```
 
-`remove` 可选择同时删除 runner 与 Work 目录；该操作不可恢复，需要明确输入 `yes`。自启动使用当前用户的 systemd 服务；若要求用户退出登录后仍在开机时启动，需要管理员为该账号启用 lingering：`sudo loginctl enable-linger <用户名>`。Linux 配置默认位于 `${XDG_CONFIG_HOME:-~/.config}/gh-runner`。`list`、`start`、`stop` 和 `autostart` 可直接用于脚本；注册与注销会交互认证。Token 不接受命令行参数，避免泄露到 shell 历史和进程列表。
+`remove` 可选择同时删除 runner 与 Work 目录；该操作不可恢复，需要明确输入 `yes`。`autostart` 与 GUI 中的自启动开关语义一致：设置 Runner 在 GH Runner 管理器下次启动时自动拉起，跨 macOS、Windows 和 Linux 生效；它不负责将管理器本身注册为操作系统登录启动项。Linux 配置默认位于 `${XDG_CONFIG_HOME:-~/.config}/gh-runner`。`list`、`start`、`stop` 和 `autostart` 可直接用于脚本；注册与注销会交互认证。Token 不接受命令行参数，避免泄露到 shell 历史和进程列表。
 
 ## 使用
 
@@ -100,7 +101,7 @@ HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890 pnpm start
 - **保留与复用**：注销默认不勾选「同时清理本地实例文件」，仍会完成 GitHub 注销，保留运行程序、工作文件和日志，实例显示为「已注销 · 文件保留」，且关闭自启。
   「打开工作目录」可直接在文件管理器中查看、手动删除工作文件；目录已删除时会提示错误，不会自动删除其他路径。
   保留安装文件后可点击「重新注册」，重新授权、复用原目录和实例名称，无需再次解包，也不清空工作文件。
-- **可选清理**：勾选后，仅在 GitHub 注销成功后永久删除该实例目录及其内部工作文件、日志，并移除本地实例记录。注销失败不会删除文件；实例目录外的工作文件、共享下载包不会删除。
+- **可选清理**：勾选后，仅在 GitHub 注销成功后永久删除该实例目录、单独配置的 Work 目录及日志，并移除本地实例记录。注销失败不会删除文件；与用户目录、应用目录或其他 Runner 重叠的路径会被安全检查拦截，共享下载包不会删除。
   重新注册生成新的 GitHub runner 身份，完成后保持停止，由用户点击启动。若安装文件也已删除，需重新下载分发包并添加实例。
 - **日志分析**：右侧面板实时滚动所选实例的 `_diag` 控制台行；绿=成功、红=失败、蓝=作业开始，
   时间戳恒为中性灰。卡片上常驻「最近动作」的结果与耗时。
