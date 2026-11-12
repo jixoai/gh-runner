@@ -197,6 +197,7 @@ export type UiCommand =
   | { type: "open-work-dir"; id: string }
   | ({ type: "runner-operation" } & RunnerOperationRequest)
   | { type: "open-url"; url: string }
+  | { type: "write-clipboard"; requestId: string; text: string }
   | { type: "download-latest"; sourceTemplate?: string; selection?: RunnerPackageSelection }
   | { type: "pause-download" }
   | { type: "resume-download" }

@@ -215,10 +215,11 @@ async function main(): Promise<void> {
     return;
   }
 
-  const [{ createTray }, { attachDialog }, { attachOpener }, { TrayProjection }, { UiHost, extendWebview }, { appIcon }] = await Promise.all([
+  const [{ createTray }, { attachDialog }, { attachOpener }, { attachClipboard }, { TrayProjection }, { UiHost, extendWebview }, { appIcon }] = await Promise.all([
     import("opentray"),
     import("@opentray/ext-dialog"),
     import("@opentray/ext-opener"),
+    import("@opentray/ext-clipboard"),
     import("./tray.ts"),
     import("./window.ts"),
     import("./branding.ts"),
@@ -234,6 +235,7 @@ async function main(): Promise<void> {
 
   const webviewTray = extendWebview(tray);
   const opener = attachOpener(tray);
+  const clipboard = attachClipboard(tray);
   const uiHost = new UiHost(
     fleet,
     webviewTray,
@@ -263,6 +265,7 @@ async function main(): Promise<void> {
       if (!(await stat(path)).isDirectory()) throw new Error("工作目录不存在或不是文件夹");
       await opener.open(path);
     },
+    (text) => clipboard.writeText(text),
   );
 
   let stopSnapshots = () => {};

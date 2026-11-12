@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => {
 });
 
 vi.mock("opentray", () => ({ createTray: mocks.createTray }));
+vi.mock("@opentray/ext-clipboard", () => ({ attachClipboard: () => ({ writeText: vi.fn(async () => {}) }) }));
 vi.mock("@opentray/ext-dialog", () => ({ attachDialog: vi.fn() }));
 vi.mock("@opentray/ext-opener", () => ({ attachOpener: () => ({}) }));
 vi.mock("../src/branding.ts", () => ({ appIcon: () => [] }));

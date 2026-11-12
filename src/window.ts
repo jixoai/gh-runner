@@ -79,6 +79,7 @@ export class UiHost {
     /** 默认浏览器打开外部链接（ext-opener open）。 */
     private readonly openExternal: (url: string) => Promise<void>,
     private readonly onOpenWorkDir: (id: string) => Promise<void> = async () => {},
+    private readonly writeClipboard: (text: string) => Promise<void> = async () => {},
   ) {}
 
   open(): Promise<void> {
@@ -117,6 +118,7 @@ export class UiHost {
       height: 700,
       title: `GH Runner v${APP_VERSION}`,
       nativeWindowApi: true,
+      nativeApiPolicy: { clipboard: ["'local'"] },
       devtools: true,
       style: {
         appMode: true,
@@ -181,7 +183,7 @@ export class UiHost {
     if (!win) return;
     try {
       await win.evaluate(
-        `window.__rfSink({kind:"summary",seq:99999,now:new Date().toISOString(),task:{kind:"none",status:"ok",message:null},instances:[]})`,
+        `if(typeof window.__rfSink==="function")window.__rfSink({kind:"summary",seq:99999,now:new Date().toISOString(),task:{kind:"none",status:"ok",message:null},instances:[]})`,
       );
     } catch (err) {
       if (process.env.RF_DEBUG) console.error("[ui] minimal evaluate 失败:", err);
@@ -319,7 +321,7 @@ export class UiHost {
     const win = this.#window;
     if (!win || win.connectionDead) return false;
     try {
-      const js = `window.__rfSink(${jsLiteral(json)})`;
+      const js = `if(typeof window.__rfSink==="function")window.__rfSink(${jsLiteral(json)})`;
       if (process.env.RF_DEBUG) console.error(`[ui] evaluate ${js.length} bytes: ${json.slice(0, 60)}`);
       await win.evaluate(js);
       return true;
@@ -412,6 +414,21 @@ export class UiHost {
         } catch (err) {
           console.error("[gh-runner] 打开链接失败:", err);
         }
+        break;
+      }
+      case "write-clipboard": {
+        let result: { requestId: string; ok: boolean; error?: string };
+        try {
+          await this.writeClipboard(cmd.text);
+          result = { requestId: cmd.requestId, ok: true };
+        } catch (error) {
+          result = {
+            requestId: cmd.requestId,
+            ok: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+        await this.#evaluate(`window.dispatchEvent(new CustomEvent("gh-runner:clipboard-result",{detail:${JSON.stringify(result)}}))`);
         break;
       }
       case "register": {

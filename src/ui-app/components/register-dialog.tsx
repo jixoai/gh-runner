@@ -211,8 +211,15 @@ export function DeviceAuthorization({ code, uri, expiresAt }: { code: string; ur
   }, [uri]);
   const seconds = Math.max(0, Math.ceil((expiresAt - tick * 1000) / 1000));
   const copy = async () => {
-    try { await navigator.clipboard.writeText(code); setCopied(true); setCopyError(false); }
-    catch { setCopyError(true); }
+    try {
+      await store.writeClipboard(code);
+      setCopied(true);
+      setCopyError(false);
+    }
+    catch (error) {
+      console.error("[gh-runner] 验证码复制失败:", error);
+      setCopyError(true);
+    }
   };
   return <section aria-label="GitHub 设备授权" className="space-y-4">
     <div className="flex flex-wrap items-center gap-5">

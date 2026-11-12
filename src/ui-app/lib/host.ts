@@ -36,6 +36,7 @@ export interface PackageInfo {
 export type SummaryPush = Extract<UiPush, { kind: "summary" }>;
 
 const EMPTY_LOGS: string[] = [];
+let clipboardRequestSequence = 0;
 
 class HostStore {
   summary: SummaryPush | null = null;
@@ -88,6 +89,26 @@ class HostStore {
       .opentray?.ipc;
     if (ipc) ipc.postMessage(cmd);
     else void demoCommand(cmd);
+  };
+
+  writeClipboard = (text: string): Promise<void> => {
+    const requestId = `clipboard-${++clipboardRequestSequence}`;
+    return new Promise((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        window.removeEventListener("gh-runner:clipboard-result", onResult);
+        reject(new Error("剪贴板请求超时"));
+      }, 5000);
+      const onResult = (event: Event) => {
+        const result = (event as CustomEvent<{ requestId: string; ok: boolean; error?: string }>).detail;
+        if (result?.requestId !== requestId) return;
+        window.clearTimeout(timeout);
+        window.removeEventListener("gh-runner:clipboard-result", onResult);
+        if (result.ok) resolve();
+        else reject(new Error(result.error || "系统剪贴板写入失败"));
+      };
+      window.addEventListener("gh-runner:clipboard-result", onResult);
+      this.send({ type: "write-clipboard", requestId, text });
+    });
   };
 
   logsOf(id: string | null): string[] {

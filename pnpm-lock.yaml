@@ -166,18 +166,21 @@ importers:
 
   .:
     dependencies:
+      '@opentray/ext-clipboard':
+        specifier: ^0.36.2
+        version: 0.36.2(opentray@0.36.2(@gaubee/util@0.35.2))
       '@opentray/ext-dialog':
-        specifier: ^0.36.1
-        version: 0.36.1(opentray@0.36.1(@gaubee/util@0.35.2))
+        specifier: ^0.36.2
+        version: 0.36.2(opentray@0.36.2(@gaubee/util@0.35.2))
       '@opentray/ext-opener':
-        specifier: ^0.36.1
-        version: 0.36.1(opentray@0.36.1(@gaubee/util@0.35.2))
+        specifier: ^0.36.2
+        version: 0.36.2(opentray@0.36.2(@gaubee/util@0.35.2))
       '@opentray/ext-webview':
-        specifier: ^0.36.1
-        version: 0.36.1(opentray@0.36.1(@gaubee/util@0.35.2))
+        specifier: ^0.36.2
+        version: 0.36.2(opentray@0.36.2(@gaubee/util@0.35.2))
       '@opentray/icon':
-        specifier: ^0.36.1
-        version: 0.36.1
+        specifier: ^0.36.2
+        version: 0.36.2
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -197,8 +200,8 @@ importers:
         specifier: ^0.4.6
         version: 0.4.6(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
       opentray:
-        specifier: ^0.36.1
-        version: 0.36.1(@gaubee/util@0.35.2)
+        specifier: ^0.36.2
+        version: 0.36.2(@gaubee/util@0.35.2)
       qrcode:
         specifier: ^1.5.4
         version: 1.5.4
@@ -320,85 +323,90 @@ packages:
   '@jsquash/webp@1.5.0':
     resolution: {integrity: sha512-KggLoj2MnRSfIqTeKe1EmbljTX2vuV7mh79k89PCL1pyqiDULcPM1L47twxXt0hkb68F70bXiL31MxsuoZtKFw==}
 
-  '@opentray/darwin-arm64@0.36.1':
-    resolution: {integrity: sha512-Ht25tqD3st3Loeiy0ZEwAEIk3QWpeD0uL58XHQ/u9xAhT/UJmm3UURrdt99uIf10I1YhqHZ31lf/DiYknnWMCQ==}
+  '@opentray/darwin-arm64@0.36.2':
+    resolution: {integrity: sha512-K80JGo5vkysWY87u7rvHDN5QpPnwz3xtzXodBpvuF15SmImWj1fyo37rxRuniwY6YOSFTzftCnpAGjjLhfedTg==}
     cpu: [arm64]
     os: [darwin]
 
-  '@opentray/darwin-x64@0.36.1':
-    resolution: {integrity: sha512-+KGuJcCl+hlxmRhtAoADd9P/eiHqaSwc1TzzWAjXbqF68mY9az1Zj8xWXRafcY03mUXXus+5SMBOtMgh9xMifw==}
+  '@opentray/darwin-x64@0.36.2':
+    resolution: {integrity: sha512-9StZOLepF1adFJNb9vzcMCnCatsJ8Xd2VdA0HyEIU5iJuM+cAr38PcCmEOHJuk2u6W4bkBX3ktxGJMrRolglKQ==}
     cpu: [x64]
     os: [darwin]
 
-  '@opentray/ext-dialog@0.36.1':
-    resolution: {integrity: sha512-BGjSGgnAM52/T8WC8CBOuZXMI/rBWpPQDOwnYHbFnd3h4uQuTPWcOXtgbv7UGQZkeJjFb9qL9OEbvcOyQn2uiw==}
+  '@opentray/ext-clipboard@0.36.2':
+    resolution: {integrity: sha512-I3234RyaFbcZRUFbWZuj6PW1bz2xYXaWRjXgRCCb3vPjOR2hXTpT1Eu6h3OWh1FjO0RHIg99BNGi1pajseFEew==}
     peerDependencies:
       opentray: '>=0.0.0'
 
-  '@opentray/ext-opener@0.36.1':
-    resolution: {integrity: sha512-Opy/kiHmD02FzOkIAU/qzjVqb1opiMWjl86u/B12pzNuC8Y4IqgPMkST0oGIMWFFiASoHj1WhmBsE1U4NuNrjA==}
+  '@opentray/ext-dialog@0.36.2':
+    resolution: {integrity: sha512-7TSCI8pgi7qI+hU0tNa9j6L9j6cOsGQloBuMmZOeF74YkGQP2hoQzqgmzeFMQkSNS0saQFCqS2q0MVdxo+fVGw==}
     peerDependencies:
       opentray: '>=0.0.0'
 
-  '@opentray/ext-webview-darwin-arm64@0.36.1':
-    resolution: {integrity: sha512-lagWQepJuL2JhKmfa1vSiLSlUTJIvMGpn0ME0E0eG24iPK8QD2iCbDnlIYeBQUtQCE/kxFcgYpgIU9PNf6rbEw==}
+  '@opentray/ext-opener@0.36.2':
+    resolution: {integrity: sha512-zIfSzp9Hb1EYy+cnT1Ev+/f1riT240OObtuHqwplUAt6eVCMSE+VZjna3O9bbpUnAKTAq3YxIiUbr+bvDnAh0g==}
+    peerDependencies:
+      opentray: '>=0.0.0'
+
+  '@opentray/ext-webview-darwin-arm64@0.36.2':
+    resolution: {integrity: sha512-lDL4dqWp1F+AsGM5gbVzQGQ6sPVk7vol2uWZkS3bt1B+k+yCIa8HwyEu+H1YxrL3fcGwcNfKxBOf0F94N1ZhKw==}
     cpu: [arm64]
     os: [darwin]
     peerDependencies:
       opentray: '>=0.1.0'
 
-  '@opentray/ext-webview-darwin-x64@0.36.1':
-    resolution: {integrity: sha512-Y6th+YBPp8QDjlWiyDmL7vXAVGgZbRjOURW4IFccChhzCts9WPYkK4+VzjZSFBcBo16NlWjDoeX0P9j3aQmpTQ==}
+  '@opentray/ext-webview-darwin-x64@0.36.2':
+    resolution: {integrity: sha512-AdMv2xJCxHZZW2PtQ9h81AzwyLler4MpWtJT9Le56Bu8fcpodSgLyVsQskCepCJRPTFZoVUICuEX/50rOYf6Xg==}
     cpu: [x64]
     os: [darwin]
     peerDependencies:
       opentray: '>=0.1.0'
 
-  '@opentray/ext-webview-windows-arm64@0.36.1':
-    resolution: {integrity: sha512-MNEW1JZrNSR41fkQEA8/lDyCNwp3Ni1ZVMzkylNJo72EY0ls7qNAXOjYAzqkHWmQvRG8eT+oH+6S/557/3TZQg==}
+  '@opentray/ext-webview-windows-arm64@0.36.2':
+    resolution: {integrity: sha512-369sVlaQIiXnuzZiMTvJ/SezRWbjQywDWD+5Dc/Z+cE6cfnEfAnO+tybJv+UBPN8zbdu9cASisdeU5+/ia2shA==}
     cpu: [arm64]
     os: [win32]
     peerDependencies:
       opentray: '>=0.1.0'
 
-  '@opentray/ext-webview-windows-x64@0.36.1':
-    resolution: {integrity: sha512-sIWLUJPiV8IkX51+XSLw9VRtFuUMl4513Tv6At/utDAnwwfEWiQRyjHilBqsDxBoHq+aReq4HhwZ6qbajW0mBQ==}
+  '@opentray/ext-webview-windows-x64@0.36.2':
+    resolution: {integrity: sha512-sCLFrt/XNa6ZzUZfl+sPoxUrYVmnH3lj6aVVfDKMnmr6ECk2k6z2f51ULXnD2UrwqMkrevD0TUM1V1gdfITJAQ==}
     cpu: [x64]
     os: [win32]
     peerDependencies:
       opentray: '>=0.1.0'
 
-  '@opentray/ext-webview@0.36.1':
-    resolution: {integrity: sha512-pPQuDoiI/RifFA/JNPbnoSsXa4DsGxYkgOeFHwzelEjViTWGXg4eRf6tRTjhk4+Gbz5WmuGBZkKQeJIv0ZEOJQ==}
+  '@opentray/ext-webview@0.36.2':
+    resolution: {integrity: sha512-/wNJq4lp2noJghnxwMLA/i6E7Qlcb6uet69DqRvLvb7CtGrrY1UVrREK5l4jgJDR+HbJVFc1S6FhnKku6vPx2Q==}
     peerDependencies:
       opentray: '>=0.0.0'
 
-  '@opentray/icon@0.36.1':
-    resolution: {integrity: sha512-7BZ0Hiev1RuM8cD1AjTwOXrEVui9hanHUARg2OAU1AEQnLy0uV2zpSZJvRA9OIuWa360DuVUj/MjW+ntB51yYw==}
+  '@opentray/icon@0.36.2':
+    resolution: {integrity: sha512-YBriYO/4Yv+v9wEq0mRLN6COQVMA3QvNHSDRCiYAj+5Rf1lMK7a//MgJcc1X5wVGXZMkWBgi6xpHPNMtl6q32Q==}
 
-  '@opentray/linux-arm64@0.36.1':
-    resolution: {integrity: sha512-exTyZ/M5flsWjkiPs2t97WzU6Ri/GPFEM9EMB6TBgez27lBy7rg5Irj4SrJLrWmdgSUQ5PWxp1ZkUVBSHBtvYQ==}
+  '@opentray/linux-arm64@0.36.2':
+    resolution: {integrity: sha512-idWn4WUW6syqo1jztWDGUfjkEkRlfWVu3swyN7QOz8QP5oi2eLcKIh8K9rjaGBbRJwnxqLeAYyG+kh5v5x2W6A==}
     cpu: [arm64]
     os: [linux]
 
-  '@opentray/linux-x64@0.36.1':
-    resolution: {integrity: sha512-fxWRTirE5yWUfBsLEk40Wbh7SA3MK3T6qkr00QljGCFwAD/QPzhUx/KIr1DWc4n+IHPrmkuRyycyH4nkw2+oZA==}
+  '@opentray/linux-x64@0.36.2':
+    resolution: {integrity: sha512-hBLHDj2Mx7qZ+8YQjYVysL4SoWIwLxz54grSoLASr5AzGjeIHfdBZZoW2hPtge0GXf3mS4Ps489N5BwN/nPrhA==}
     cpu: [x64]
     os: [linux]
 
-  '@opentray/packaging@0.36.1':
-    resolution: {integrity: sha512-OoLajeqx+IpADH0n98bz/5S4GoKXlVf0gD0843rxEr4WlyCXaWVYOsScp+b8rPCrMQ7+zHm9pyHY5fXhE2DZ3Q==}
+  '@opentray/packaging@0.36.2':
+    resolution: {integrity: sha512-QGK2836TDsfHBM+On7rBAhr8ECU5ZCjMmnu1eK+6lr0Rbg4RgvW25OR5bV18YBqYF1B0iUmbCzrUpAVeL9F7qQ==}
 
-  '@opentray/spec@0.36.1':
-    resolution: {integrity: sha512-7oh4uwTK6PZJxx74FKavIVOPtJHi9mvPed1Juc9zdf0gEy5UVmeMKdgsK1YzGHadCEz+qwgRG7vHEkSNMOAxYA==}
+  '@opentray/spec@0.36.2':
+    resolution: {integrity: sha512-sb8Ib79KU8lKGjG+5AG9i7x2Ot/64mU5cK6hz29FGh08vjKI+IzJVQtOeZ9VeZ+e658s01/9R79eH5cSykxzHA==}
 
-  '@opentray/windows-arm64@0.36.1':
-    resolution: {integrity: sha512-WVNuNPli36/mvSmhw/uF6jDZmzv/mVEXpjP1qO1M4fIsZiEejMMFg0ql8dFActEhaXMJFsErbBKFnKYuRQBQQQ==}
+  '@opentray/windows-arm64@0.36.2':
+    resolution: {integrity: sha512-VgI5BHKCE4Uwf6qQzmvupxOHHEIxahKUv90KCD/l6VPLoB5NKZ74qxS/FGYZZpkBDV35kur9Y/0AahvGpXK/wg==}
     cpu: [arm64]
     os: [win32]
 
-  '@opentray/windows-x64@0.36.1':
-    resolution: {integrity: sha512-2rrAiLqedRiaK3ZrmXpAMkHH3NQJJofyv8QThfM2hYkZN8r1LkQMvDxUeQdLIg/e6dBAmj3o41CEAJP5XKer2w==}
+  '@opentray/windows-x64@0.36.2':
+    resolution: {integrity: sha512-iqLgVPOtgkWzGho1+oxEz/e5J2hB6qqZCcItqV5DffmVJfP/eXsQzE+XGqGqWNpnHgHP2Q6I8pqDH91UcLHFRA==}
     cpu: [x64]
     os: [win32]
 
@@ -1910,8 +1918,8 @@ packages:
     resolution: {integrity: sha512-5vvB5+W7ePv+p3uqxi+RcW1XAzLW0/hxt3/4X4Lc4qHudzOhmBiBwOY6DRob4WnanAEGvNcLjF+KNOufrUoEQw==}
     engines: {node: '>=12.20.0'}
 
-  opentray@0.36.1:
-    resolution: {integrity: sha512-qs6GoIwcFJSdeMTRGVsV6PFpLgBaiE5aSoVG/JtwfCegBIhw3UWe2DSXHi2qMqlu9gGJetxoJVkJtaoBjgoO9w==}
+  opentray@0.36.2:
+    resolution: {integrity: sha512-vcapYyxpK/FkSH1y3YGMZuILZwksNhgjjD0jrKdmwiHvg4yoqjFrVWCmLvbURJKt3hNDZAqoXQaOhzjtuG465Q==}
     hasBin: true
 
   p-limit@2.3.0:
@@ -2401,82 +2409,86 @@ snapshots:
     dependencies:
       wasm-feature-detect: 1.9.0
 
-  '@opentray/darwin-arm64@0.36.1':
+  '@opentray/darwin-arm64@0.36.2':
     optional: true
 
-  '@opentray/darwin-x64@0.36.1':
+  '@opentray/darwin-x64@0.36.2':
     optional: true
 
-  '@opentray/ext-dialog@0.36.1(opentray@0.36.1(@gaubee/util@0.35.2))':
+  '@opentray/ext-clipboard@0.36.2(opentray@0.36.2(@gaubee/util@0.35.2))':
     dependencies:
-      opentray: 0.36.1(@gaubee/util@0.35.2)
+      opentray: 0.36.2(@gaubee/util@0.35.2)
 
-  '@opentray/ext-opener@0.36.1(opentray@0.36.1(@gaubee/util@0.35.2))':
+  '@opentray/ext-dialog@0.36.2(opentray@0.36.2(@gaubee/util@0.35.2))':
     dependencies:
-      opentray: 0.36.1(@gaubee/util@0.35.2)
+      opentray: 0.36.2(@gaubee/util@0.35.2)
 
-  '@opentray/ext-webview-darwin-arm64@0.36.1(opentray@0.36.1(@gaubee/util@0.35.2))':
+  '@opentray/ext-opener@0.36.2(opentray@0.36.2(@gaubee/util@0.35.2))':
     dependencies:
-      opentray: 0.36.1(@gaubee/util@0.35.2)
+      opentray: 0.36.2(@gaubee/util@0.35.2)
+
+  '@opentray/ext-webview-darwin-arm64@0.36.2(opentray@0.36.2(@gaubee/util@0.35.2))':
+    dependencies:
+      opentray: 0.36.2(@gaubee/util@0.35.2)
     optional: true
 
-  '@opentray/ext-webview-darwin-x64@0.36.1(opentray@0.36.1(@gaubee/util@0.35.2))':
+  '@opentray/ext-webview-darwin-x64@0.36.2(opentray@0.36.2(@gaubee/util@0.35.2))':
     dependencies:
-      opentray: 0.36.1(@gaubee/util@0.35.2)
+      opentray: 0.36.2(@gaubee/util@0.35.2)
     optional: true
 
-  '@opentray/ext-webview-windows-arm64@0.36.1(opentray@0.36.1(@gaubee/util@0.35.2))':
+  '@opentray/ext-webview-windows-arm64@0.36.2(opentray@0.36.2(@gaubee/util@0.35.2))':
     dependencies:
-      opentray: 0.36.1(@gaubee/util@0.35.2)
+      opentray: 0.36.2(@gaubee/util@0.35.2)
     optional: true
 
-  '@opentray/ext-webview-windows-x64@0.36.1(opentray@0.36.1(@gaubee/util@0.35.2))':
+  '@opentray/ext-webview-windows-x64@0.36.2(opentray@0.36.2(@gaubee/util@0.35.2))':
     dependencies:
-      opentray: 0.36.1(@gaubee/util@0.35.2)
+      opentray: 0.36.2(@gaubee/util@0.35.2)
     optional: true
 
-  '@opentray/ext-webview@0.36.1(opentray@0.36.1(@gaubee/util@0.35.2))':
+  '@opentray/ext-webview@0.36.2(opentray@0.36.2(@gaubee/util@0.35.2))':
     dependencies:
-      opentray: 0.36.1(@gaubee/util@0.35.2)
+      opentray: 0.36.2(@gaubee/util@0.35.2)
     optionalDependencies:
-      '@opentray/ext-webview-darwin-arm64': 0.36.1(opentray@0.36.1(@gaubee/util@0.35.2))
-      '@opentray/ext-webview-darwin-x64': 0.36.1(opentray@0.36.1(@gaubee/util@0.35.2))
-      '@opentray/ext-webview-windows-arm64': 0.36.1(opentray@0.36.1(@gaubee/util@0.35.2))
-      '@opentray/ext-webview-windows-x64': 0.36.1(opentray@0.36.1(@gaubee/util@0.35.2))
+      '@opentray/ext-webview-darwin-arm64': 0.36.2(opentray@0.36.2(@gaubee/util@0.35.2))
+      '@opentray/ext-webview-darwin-x64': 0.36.2(opentray@0.36.2(@gaubee/util@0.35.2))
+      '@opentray/ext-webview-windows-arm64': 0.36.2(opentray@0.36.2(@gaubee/util@0.35.2))
+      '@opentray/ext-webview-windows-x64': 0.36.2(opentray@0.36.2(@gaubee/util@0.35.2))
 
-  '@opentray/icon@0.36.1':
+  '@opentray/icon@0.36.2':
     dependencies:
       '@jsquash/avif': 2.1.1
       '@jsquash/jpeg': 1.6.0
       '@jsquash/png': 3.1.1
       '@jsquash/resize': 2.1.1
       '@jsquash/webp': 1.5.0
-      '@opentray/spec': 0.36.1
+      '@opentray/spec': 0.36.2
       '@resvg/resvg-wasm': 2.6.2
       '@shockpkg/icon-encoder': 3.2.3
       exifr: 7.1.3
       figma-squircle: 1.1.0
 
-  '@opentray/linux-arm64@0.36.1':
+  '@opentray/linux-arm64@0.36.2':
     optional: true
 
-  '@opentray/linux-x64@0.36.1':
+  '@opentray/linux-x64@0.36.2':
     optional: true
 
-  '@opentray/packaging@0.36.1(@gaubee/util@0.35.2)':
+  '@opentray/packaging@0.36.2(@gaubee/util@0.35.2)':
     dependencies:
       '@gaubee/node': 0.4.0(@gaubee/util@0.35.2)
-      '@opentray/spec': 0.36.1
+      '@opentray/spec': 0.36.2
       plist: 5.0.0
     transitivePeerDependencies:
       - '@gaubee/util'
 
-  '@opentray/spec@0.36.1': {}
+  '@opentray/spec@0.36.2': {}
 
-  '@opentray/windows-arm64@0.36.1':
+  '@opentray/windows-arm64@0.36.2':
     optional: true
 
-  '@opentray/windows-x64@0.36.1':
+  '@opentray/windows-x64@0.36.2':
     optional: true
 
   '@oxc-project/types@0.155.0': {}
@@ -3750,18 +3762,18 @@ snapshots:
 
   obug@3.0.0: {}
 
-  opentray@0.36.1(@gaubee/util@0.35.2):
+  opentray@0.36.2(@gaubee/util@0.35.2):
     dependencies:
-      '@opentray/icon': 0.36.1
-      '@opentray/packaging': 0.36.1(@gaubee/util@0.35.2)
-      '@opentray/spec': 0.36.1
+      '@opentray/icon': 0.36.2
+      '@opentray/packaging': 0.36.2(@gaubee/util@0.35.2)
+      '@opentray/spec': 0.36.2
     optionalDependencies:
-      '@opentray/darwin-arm64': 0.36.1
-      '@opentray/darwin-x64': 0.36.1
-      '@opentray/linux-arm64': 0.36.1
-      '@opentray/linux-x64': 0.36.1
-      '@opentray/windows-arm64': 0.36.1
-      '@opentray/windows-x64': 0.36.1
+      '@opentray/darwin-arm64': 0.36.2
+      '@opentray/darwin-x64': 0.36.2
+      '@opentray/linux-arm64': 0.36.2
+      '@opentray/linux-x64': 0.36.2
+      '@opentray/windows-arm64': 0.36.2
+      '@opentray/windows-x64': 0.36.2
     transitivePeerDependencies:
       - '@gaubee/util'
 
