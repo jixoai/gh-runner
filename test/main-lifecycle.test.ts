@@ -43,11 +43,13 @@ vi.mock("../src/tray.ts", () => ({
 }));
 
 const originalArgv = process.argv;
+const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
 let previousSignals: Map<"SIGINT" | "SIGTERM", ReturnType<typeof process.listeners>>;
 
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
+  Object.defineProperty(process, "platform", { ...originalPlatform, value: "darwin" });
   process.argv = [process.execPath, "/test/gh-runner.mjs"];
   previousSignals = new Map(["SIGINT", "SIGTERM"].map((signal) => [
     signal as "SIGINT" | "SIGTERM", process.listeners(signal),
@@ -58,6 +60,7 @@ beforeEach(() => {
 
 afterEach(() => {
   process.argv = originalArgv;
+  if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform);
   for (const [signal, existing] of previousSignals) {
     for (const listener of process.listeners(signal)) {
       if (!existing.includes(listener)) process.removeListener(signal, listener);
