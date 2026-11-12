@@ -274,8 +274,11 @@ describe("runner 分发包下载控制", () => {
 
   it("等待下载响应超过 30 秒会超时，释放任务并允许重试", async () => {
     const metadataFetch = vi.mocked(globalThis.fetch).getMockImplementation()!;
+    let markDownloadStarted!: () => void;
+    const downloadStarted = new Promise<void>((resolve) => { markDownloadStarted = resolve; });
     vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
       if (String(input).includes("api.github.com")) return metadataFetch(input, init);
+      markDownloadStarted();
       return new Promise<Response>((_resolve, reject) => {
         const signal = init!.signal!;
         if (signal.aborted) reject(signal.reason);
@@ -284,7 +287,7 @@ describe("runner 分发包下载控制", () => {
     });
     vi.useFakeTimers();
     const { done } = start();
-    await vi.advanceTimersByTimeAsync(0);
+    await downloadStarted;
     await vi.advanceTimersByTimeAsync(30_001);
     expect(await done).toBeNull();
     expect(states.at(-1)).toMatchObject({ status: "error", message: expect.stringContaining("超时") });
