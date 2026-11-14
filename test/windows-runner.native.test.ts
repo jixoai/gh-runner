@@ -45,11 +45,16 @@ public class MockRunner {
   });
 
   it("真实 Ctrl-Break 被 Runner 接收，退出后不残留会话宿主", async () => {
-    const runner = startRunner(directory, () => {});
+    const output: string[] = [];
+    const runner = startRunner(directory, (stream, line) => output.push(`${stream}: ${line}`));
     expect(runner).not.toBeNull();
     pid = runner!.pid;
     const closed = new Promise<number | null>((resolve) => runner!.child.on("close", resolve));
-    await vi.waitFor(async () => expect(await readFile(join(directory, "started"), "utf8")).toBe("ready"), { timeout: 15_000 });
+    try {
+      await vi.waitFor(async () => expect(await readFile(join(directory, "started"), "utf8")).toBe("ready"), { timeout: 15_000 });
+    } catch (error) {
+      throw new Error(`Runner did not start. Host output:\n${output.join("\n")}`, { cause: error });
+    }
     expect((await findListenerProcesses(true)).get(pid)).toBe(directory);
     expect(await stopProcessGroup(pid)).toBe(true);
     expect(await closed).toBe(0);
