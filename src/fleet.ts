@@ -1028,10 +1028,12 @@ export class Fleet {
 
   async #reconcileExternal(): Promise<void> {
     const listeners = await findListenerProcesses();
-    const cwdByPid = listeners;
     // win32 身份（ExecutablePath 推导）与实例目录的大小写/分隔符可能不一致，归一后对账。
     const norm = (p: string): string =>
       PLATFORM === "win32" ? p.replace(/\\/g, "/").toLowerCase() : p;
+    const cwdByPid = new Map(await Promise.all([...listeners].map(async ([pid, cwd]) =>
+      [pid, norm(await realpath(cwd).catch(() => cwd))] as const,
+    )));
     const dirsRunning = new Set([...cwdByPid.values()].map(norm));
     for (const rt of this.#rts.values()) {
       if (rt.stoppingUntilMs > Date.now()) continue;

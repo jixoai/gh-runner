@@ -144,7 +144,7 @@ const fleet = new Fleet();
 try {
   await fleet.boot({ autoStart: false, persist: false });
   const instance = fleet.snapshot().instances[0];
-  if (!instance || instance.processState !== 'running') throw new Error('Runner was not rediscovered');
+  if (!instance || instance.processState !== 'running') throw new Error('Runner was not rediscovered: ' + JSON.stringify(fleet.snapshot().instances));
   await fleet.stop(instance.id);
   if (fleet.view(instance.id)?.processState !== 'stopped') throw new Error('Runner did not stop');
 } finally { await fleet.destroy(); }`;

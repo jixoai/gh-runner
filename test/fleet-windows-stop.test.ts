@@ -1,4 +1,4 @@
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -70,6 +70,20 @@ describe("Windows 重新接入后的停止确认", () => {
     processes.delete(4321);
     await fleet.stop(view().id);
     expect(stopProcessGroup).toHaveBeenCalledExactlyOnceWith(4322, 6000);
+    expect(view()).toMatchObject({ processState: "stopped", pid: null });
+  });
+
+  it("进程使用目录别名时仍能重新发现并停止同一个 Runner", async () => {
+    await fleet.destroy();
+    const alias = join(directory, "runner-alias");
+    await symlink(directory, alias, "junction");
+    processes = new Map([[4321, alias], [4322, alias]]);
+    fleet = new Fleet();
+    await fleet.boot({ autoStart: false, persist: false });
+    expect(view()).toMatchObject({ processState: "running", external: true, pid: 4321 });
+    await fleet.stop(view().id);
+    expect(stopProcessGroup).toHaveBeenNthCalledWith(1, 4321, 6000);
+    expect(stopProcessGroup).toHaveBeenNthCalledWith(2, 4322, 6000);
     expect(view()).toMatchObject({ processState: "stopped", pid: null });
   });
 
