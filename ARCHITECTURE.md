@@ -44,8 +44,12 @@
    支持 tar.gz/zip，三平台内置）。Windows 注册走 `Runner.Listener configure` 动词，启动由 PowerShell
    宿主创建独立的隐藏控制台后运行 `Runner.Listener.exe run`；进程发现用 PowerShell CIM，终止先发
    Ctrl-Break，等待会话清理后退出，超时才用 `taskkill /T /F`。PowerShell 自身不能使用 Node 的
-   `detached` 模式（Windows 实测会在执行命令前退出）；独立控制台由宿主 `AllocConsole` 创建，
-   而不是依赖 `DETACHED_PROCESS`，标准输入输出保留管道以支持启动与工具退出后的存活。
+   `detached` 模式（Windows 实测会在执行命令前退出）；引导进程使用原生 `CreateProcessW`，以
+   `CREATE_NEW_CONSOLE` + `STARTF_USESHOWWINDOW/SW_HIDE` 在创建时隐藏独立控制台，避免
+   `AllocConsole` 后隐藏窗口导致 Windows Terminal 抢先接管。宿主作为引导进程的子进程脱离
+   Node 与终端的退出回收 Job；禁止 breakaway 的终端通过 WMI 创建独立宿主并保留原环境。
+   日志使用每次启动独立的命名管道，而不是必须继承的终端句柄；就绪后才确认启动，管理器
+   退出导致管道关闭时仍继续排空 Runner 日志，不影响后台存活。
 4. **推送协议（实测教训）**：单次 evaluate ~100KB 全量快照在 WKWebView 路径上**静默失败**
    （promise resolve 但页面未执行）。故拆为 `summary`（KB 级）+ `log` 增量（按字节 ≤24KB/包）双通道；
    推送单飞串行（hello 与去抖推送并发交错会重复投递）；页面 hello → 宿主 offset 清零全量重推；

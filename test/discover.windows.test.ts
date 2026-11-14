@@ -25,6 +25,7 @@ describe("Windows listener discovery", () => {
     const args = io.exec.mock.calls[0]?.[1] as string[];
     const script = Buffer.from(args.at(-1)!, "base64").toString("utf16le");
     expect(script).toContain("UTF8Encoding");
+    expect(io.exec.mock.calls[0]?.[2]).toMatchObject({ windowsHide: true });
   });
 
   it("忽略配置进程和普通 PowerShell", async () => {

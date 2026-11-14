@@ -337,7 +337,7 @@ export class Fleet {
       rt.external = false;
       rt.processState = "starting";
       spawned.child.on("close", (code, signal) => {
-        if (rt.child?.pid !== spawned.pid) return;
+        if (rt.child !== spawned) return;
         const graceful = rt.processState === "stopping" || signal === "SIGTERM" || code === 0;
         const sessionConflict = rt.connectionState === "conflict";
         rt.child = null;
@@ -393,12 +393,12 @@ export class Fleet {
       return;
     }
     rt.processState = "stopping";
-    rt.stoppingUntilMs = Date.now() + (PLATFORM === "win32" ? 60_000 : 15_000);
+    rt.stoppingUntilMs = Date.now() + (PLATFORM === "win32" ? 90_000 : 15_000);
     this.#emit();
     const pid = rt.pid;
     const wasExternal = rt.external;
     const previousConnection = rt.connectionState;
-    if (wasExternal) {
+    if (wasExternal && PLATFORM !== "win32") {
       // pid 复用防护：终止前核对该 pid 的身份（cwd/可执行路径）仍是本实例目录。
       const identity = await pidIdentity(pid);
       const rtDirReal = await realpath(rt.dir).catch(() => rt.dir);
@@ -429,9 +429,31 @@ export class Fleet {
         return;
       }
     }
-    const ok = await stopProcessGroup(pid, wasExternal ? 6000 : 8000);
+    let ok: boolean;
+    let remainingPid = pid;
+    let stopError: string | null = null;
+    if (PLATFORM === "win32") {
+      try {
+        const remaining = await this.#stopWindowsRunner(rt, pid, wasExternal ? 6000 : 8000);
+        ok = remaining === null;
+        remainingPid = remaining ?? pid;
+      } catch (error) {
+        ok = false;
+        stopError = `停止失败：${error instanceof Error ? error.message : String(error)}`;
+      }
+    } else {
+      ok = await stopProcessGroup(pid, wasExternal ? 6000 : 8000);
+    }
     rt.stoppingUntilMs = 0;
-    if (wasExternal) {
+    if (PLATFORM === "win32") {
+      if (ok || rt.child?.pid !== remainingPid) rt.child = null;
+      rt.external = !ok && rt.child === null;
+      rt.pid = ok ? null : remainingPid;
+      rt.processState = ok ? "stopped" : "running";
+      rt.connectionState = ok ? "disconnected" : previousConnection;
+      rt.lastError = ok ? null : stopError ?? "停止失败：Runner 仍在运行、无权限或被系统服务重新拉起，请以相同权限检查后重试";
+      if (ok) rt.currentJob = null;
+    } else if (wasExternal) {
       // 外部进程：无 child 事件，需手动收尾。
       rt.external = !ok;
       rt.pid = ok ? null : pid;
@@ -446,6 +468,29 @@ export class Fleet {
       rt.lastError = "停止失败：进程无响应或无权限（可能由 sudo 启动）";
     }
     this.#emit();
+  }
+
+  async #stopWindowsRunner(rt: Rt, preferredPid: number, graceMs: number): Promise<number | null> {
+    const normalize = async (path: string): Promise<string> =>
+      (await realpath(path).catch(() => path)).replace(/\\/g, "/").toLowerCase();
+    const directory = await normalize(rt.dir);
+    const matching = async (processes: Map<number, string>): Promise<number[]> => {
+      const entries = await Promise.all([...processes].map(async ([pid, path]) => ({ pid, directory: await normalize(path) })));
+      return entries.filter((entry) => entry.directory === directory).map((entry) => entry.pid);
+    };
+    const processes = await findListenerProcesses(true);
+    const targets = await matching(processes);
+    if (targets.length === 0 && !processes.has(preferredPid) && pidExists(preferredPid) !== "dead") {
+      throw new Error("无法确认 Runner 进程身份，请以相同权限运行 GH Runner，停止操作已取消");
+    }
+    for (const targetPid of targets) {
+      const live = await findListenerProcesses(true);
+      const identity = live.get(targetPid);
+      if (!identity || await normalize(identity) !== directory) continue;
+      rt.stoppingUntilMs = Date.now() + 90_000;
+      if (!await stopProcessGroup(targetPid, graceMs)) return targetPid;
+    }
+    return (await matching(await findListenerProcesses(true)))[0] ?? null;
   }
 
   async setAutoStart(id: string, value: boolean): Promise<void> {
@@ -1007,6 +1052,7 @@ export class Fleet {
           this.#emitSoon();
         }
       } else if (rt.external && rt.processState === "running" && !dirsRunning.has(rtDir)) {
+        if (rt.pid !== null && !cwdByPid.has(rt.pid) && pidExists(rt.pid) !== "dead") continue;
         rt.processState = "stopped";
         rt.connectionState = "disconnected";
         rt.external = false;

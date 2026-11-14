@@ -97,6 +97,7 @@ export async function findListenerProcesses(strict = false): Promise<Map<number,
       const encoded = Buffer.from(script, "utf16le").toString("base64");
       const { stdout } = await exec("powershell", ["-NoProfile", "-EncodedCommand", encoded], {
         timeout: 15_000,
+        windowsHide: true,
       });
       const processes = JSON.parse(stdout.replace(/^\uFEFF/, "").trim()) as Array<{
         ProcessId: number; Name: string; ExecutablePath: string | null; CommandLine: string | null;

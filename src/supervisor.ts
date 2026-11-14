@@ -153,8 +153,9 @@ export async function stopProcessGroup(pid: number, graceMs = 8000): Promise<boo
     if (pidExists(pid) === "dead") return true;
     const tk = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
     const ok = await new Promise<boolean>((resolve) => {
-      tk.on("error", () => resolve(false));
-      tk.on("close", (code) => resolve(code === 0 || pidExists(pid) === "dead"));
+      const timeout = setTimeout(() => { tk.kill(); resolve(false); }, 10_000);
+      tk.on("error", () => { clearTimeout(timeout); resolve(false); });
+      tk.on("close", (code) => { clearTimeout(timeout); resolve(code === 0 || pidExists(pid) === "dead"); });
     });
     const deadline = Date.now() + graceMs;
     while (ok && Date.now() < deadline && pidExists(pid) !== "dead") {
