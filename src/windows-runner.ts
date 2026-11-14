@@ -33,6 +33,28 @@ public static class GhRunnerConsole {
         }
     }
 
+    public static int Bootstrap(string directory, string command) {
+        var settings = new ProcessStartInfo {
+            FileName = "powershell.exe",
+            Arguments = "-NoLogo -NoProfile -NonInteractive -EncodedCommand " + command,
+            WorkingDirectory = directory,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        settings.EnvironmentVariables.Remove("GH_RUNNER_CONSOLE_COMMAND");
+        using (var host = Process.Start(settings)) {
+            host.StandardInput.Close();
+            Task output = Pump(host.StandardOutput.BaseStream, Console.OpenStandardOutput());
+            Task error = Pump(host.StandardError.BaseStream, Console.OpenStandardError());
+            host.WaitForExit();
+            Task.WaitAll(output, error);
+            return host.ExitCode;
+        }
+    }
+
     public static int Run(string directory) {
         Stream output = Console.OpenStandardOutput();
         Stream error = Console.OpenStandardError();
@@ -66,7 +88,7 @@ public static class GhRunnerConsole {
         };
         using (var listener = Process.Start(settings)) {
             listener.StandardInput.Close();
-            byte[] ready = Encoding.UTF8.GetBytes("[gh-runner host ready] " + listener.Id + Environment.NewLine);
+            byte[] ready = Encoding.UTF8.GetBytes("[gh-runner host ready] " + Process.GetCurrentProcess().Id + Environment.NewLine);
             output.Write(ready, 0, ready.Length);
             output.Flush();
             Task outputTask = Pump(listener.StandardOutput.BaseStream, output);
@@ -100,6 +122,15 @@ export function windowsRunnerHost(dir: string): { file: string; args: string[] }
   return {
     file: "powershell.exe",
     args: consoleScript(`exit [GhRunnerConsole]::Run('${dir.replaceAll("'", "''")}')`),
+  };
+}
+
+export function windowsRunnerBootstrap(dir: string): { file: string; args: string[]; env: Record<string, string> } {
+  const host = windowsRunnerHost(dir);
+  return {
+    file: host.file,
+    args: consoleScript(`exit [GhRunnerConsole]::Bootstrap('${dir.replaceAll("'", "''")}', $env:GH_RUNNER_CONSOLE_COMMAND)`),
+    env: { GH_RUNNER_CONSOLE_COMMAND: host.args.at(-1)! },
   };
 }
 

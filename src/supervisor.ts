@@ -12,7 +12,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { IS_WIN, runnerSpawn } from "./platform.ts";
-import { windowsRunnerHost, windowsRunnerStop } from "./windows-runner.ts";
+import { windowsRunnerBootstrap, windowsRunnerStop } from "./windows-runner.ts";
 
 export interface SpawnedRunner {
   pid: number;
@@ -45,14 +45,14 @@ export function startRunner(
   const exists = IS_WIN ? existsSync(entry.file) : existsSync(join(dir, "run.sh"));
   if (!exists) return null;
 
-  const host = IS_WIN ? windowsRunnerHost(dir) : entry;
+  const host = IS_WIN ? windowsRunnerBootstrap(dir) : null;
   const child = IS_WIN
-    ? spawn(host.file, host.args, {
+    ? spawn(host!.file, host!.args, {
         cwd: dir,
         detached: false,
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
-        env: { ...process.env },
+        env: { ...process.env, ...host!.env },
       })
     : spawn(entry.file, entry.args, {
         cwd: dir,
@@ -71,6 +71,7 @@ export function startRunner(
     return null;
   }
   let markReady = () => {};
+  const spawned: SpawnedRunner = { pid: child.pid, child };
   let ready: Promise<void> | undefined;
   if (IS_WIN) {
     ready = new Promise<void>((resolve, reject) => {
@@ -95,9 +96,13 @@ export function startRunner(
       const lines = (partial + chunk).split("\n");
       partial = lines.pop() ?? "";
       for (const line of lines) {
-        if (IS_WIN && stream === "stdout" && /^\[gh-runner host ready\] \d+/.test(line)) {
-          markReady();
-          continue;
+        if (IS_WIN && stream === "stdout") {
+          const hostPid = /^\[gh-runner host ready\] (\d+)/.exec(line)?.[1];
+          if (hostPid) {
+            spawned.pid = Number(hostPid);
+            markReady();
+            continue;
+          }
         }
         if (line.trim()) onLine(stream, stripAnsi(line));
       }
@@ -107,7 +112,8 @@ export function startRunner(
     });
   }
   child.unref();
-  return { pid: child.pid, child, ready };
+  spawned.ready = ready;
+  return spawned;
 }
 
 /** kill(pid, 0) 的三态语义：dead=ESRCH，no-perm=EPERM（进程存活但无权限），alive=可管理。 */

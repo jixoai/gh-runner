@@ -7,7 +7,6 @@ import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { findListenerProcesses } from "../src/discover.ts";
 import { startRunner, stopProcessGroup } from "../src/supervisor.ts";
-import { windowsRunnerHost } from "../src/windows-runner.ts";
 
 const exec = promisify(execFile);
 let directory: string;
@@ -72,6 +71,7 @@ public class MockRunner {
     const output: string[] = [];
     const runner = startRunner(directory, (stream, line) => output.push(`${stream}: ${line}`));
     expect(runner).not.toBeNull();
+    await runner!.ready;
     pid = runner!.pid;
     let exitCode: number | null | undefined;
     const closed = new Promise<number | null>((resolve) => runner!.child.on("close", (code) => {

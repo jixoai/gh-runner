@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { windowsRunnerHost, windowsRunnerHostDirectory, windowsRunnerStop } from "../src/windows-runner.ts";
+import { windowsRunnerBootstrap, windowsRunnerHost, windowsRunnerHostDirectory, windowsRunnerStop } from "../src/windows-runner.ts";
 
 describe("Windows runner console host", () => {
+  it("引导进程通过 .NET 启动独立宿主，避免 Node 的退出回收", () => {
+    const bootstrap = windowsRunnerBootstrap("C:\\runner");
+    expect(windowsRunnerHostDirectory(bootstrap.args.join(" "))).toBeNull();
+    expect(windowsRunnerHostDirectory(`-EncodedCommand ${bootstrap.env.GH_RUNNER_CONSOLE_COMMAND}`)).toBe("C:\\runner");
+    const script = Buffer.from(bootstrap.args.at(-1)!, "base64").toString("utf16le");
+    expect(script).toContain("[GhRunnerConsole]::Bootstrap");
+    expect(script).toContain('settings.EnvironmentVariables.Remove("GH_RUNNER_CONSOLE_COMMAND")');
+  });
   it.each(["C:\\actions-runners\\runner-01", "C:\\用户\\it's runner; $(test)\\实例"])("编码命令安全保留目录：%s", (directory) => {
     const host = windowsRunnerHost(directory);
     expect(host.file).toBe("powershell.exe");

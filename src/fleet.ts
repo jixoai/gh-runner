@@ -356,6 +356,10 @@ export class Fleet {
       });
       this.#emitSoon();
       await spawned.ready;
+      if (rt.startGeneration === generation && rt.child === spawned) {
+        rt.pid = spawned.pid;
+        this.#emitSoon();
+      }
     } catch (error) {
       if (rt.startGeneration !== generation) return;
       if (rt.child) {
@@ -380,8 +384,8 @@ export class Fleet {
     const rt = this.#rts.get(id);
     if (!rt) return;
     if (rt.processState !== "running" && rt.processState !== "starting") return;
+    rt.startGeneration += 1;
     if (rt.pid == null) {
-      rt.startGeneration += 1;
       rt.processState = "stopped";
       rt.connectionState = "disconnected";
       rt.lastError = null;

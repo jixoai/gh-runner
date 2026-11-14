@@ -54,6 +54,7 @@ describe("Windows supervisor", () => {
     const runner = startRunner("C:\\runner", output)!;
     child.stdout.write("[gh-runner host ready] 5678\r\n");
     await expect(runner.ready).resolves.toBeUndefined();
+    expect(runner.pid).toBe(5678);
     expect(output).not.toHaveBeenCalled();
     child.emit("close", 0);
   });
