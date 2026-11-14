@@ -47,7 +47,8 @@
    `detached` 模式（Windows 实测会在执行命令前退出）；引导进程使用原生 `CreateProcessW`，以
    `CREATE_NEW_CONSOLE` + `STARTF_USESHOWWINDOW/SW_HIDE` 在创建时隐藏独立控制台，避免
    `AllocConsole` 后隐藏窗口导致 Windows Terminal 抢先接管。宿主作为引导进程的子进程脱离
-   Node 与终端的退出回收 Job；禁止 breakaway 的终端通过 WMI 创建独立宿主并保留原环境。
+   Node 与终端的退出回收 Job；原生宿主先以挂起状态创建，确认完全脱离嵌套 Job 后才恢复，
+   仍受任一外层 Job 约束时丢弃未执行的宿主，通过 WMI 创建独立宿主并保留原环境。
    日志使用每次启动独立的命名管道，而不是必须继承的终端句柄；就绪后才确认启动，管理器
    退出导致管道关闭时仍继续排空 Runner 日志，不影响后台存活。
 4. **推送协议（实测教训）**：单次 evaluate ~100KB 全量快照在 WKWebView 路径上**静默失败**

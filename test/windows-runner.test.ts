@@ -12,6 +12,10 @@ describe("Windows runner console host", () => {
     expect(script).toContain("Flags = STARTF_USESHOWWINDOW");
     expect(script).toContain("ShowWindow = SW_HIDE");
     expect(script).toContain("false, CREATE_NEW_CONSOLE | CREATE_BREAKAWAY_FROM_JOB");
+    expect(script).toContain("CREATE_BREAKAWAY_FROM_JOB | CREATE_SUSPENDED");
+    expect(script).toContain("IsProcessInJob(process.ProcessHandle, IntPtr.Zero, out inJob)");
+    expect(script).toContain("Cannot discard attached runner host");
+    expect(script).toContain("ResumeThread(process.ThreadHandle)");
     expect(script).toContain("failure != 5");
     expect(script).toContain("Invoke-CimMethod -ClassName Win32_Process -MethodName Create");
     expect(script).toContain("EnvironmentVariables = $environment");

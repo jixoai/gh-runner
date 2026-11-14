@@ -148,7 +148,7 @@ try {
   await fleet.stop(instance.id);
   if (fleet.view(instance.id)?.processState !== 'stopped') throw new Error('Runner did not stop');
 } finally { await fleet.destroy(); }`;
-    await exec(process.execPath, ["--input-type=module", "-e", restarted], { env: { ...process.env, APPDATA: join(directory, "config") }, timeout: 50_000 });
+    await exec(process.execPath, ["--experimental-transform-types", "--input-type=module", "-e", restarted], { env: { ...process.env, APPDATA: join(directory, "config") }, timeout: 50_000 });
     expect(pidExists(pid)).toBe("dead");
     expect([...await findListenerProcesses(true)].some(([, path]) => path === directory)).toBe(false);
     expect(await readFile(join(directory, "graceful-stop"), "utf8")).toBe("ControlBreak");

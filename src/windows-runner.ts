@@ -12,6 +12,7 @@ using System.Threading.Tasks;
 
 public static class GhRunnerConsole {
     private const uint CREATE_NEW_CONSOLE = 0x00000010;
+    private const uint CREATE_SUSPENDED = 0x00000004;
     private const uint CREATE_BREAKAWAY_FROM_JOB = 0x01000000;
     private const uint STARTF_USESHOWWINDOW = 0x00000001;
     private const ushort SW_HIDE = 0;
@@ -49,6 +50,8 @@ public static class GhRunnerConsole {
     private static extern bool CreateProcess(string application, StringBuilder commandLine, IntPtr processAttributes, IntPtr threadAttributes, bool inheritHandles, uint creationFlags, IntPtr environment, string directory, ref StartupInfo startup, out ProcessInfo process);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] private static extern void GetStartupInfo(out StartupInfo startup);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern IntPtr OpenProcess(uint access, bool inheritHandle, uint processId);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern uint ResumeThread(IntPtr thread);
     [DllImport("kernel32.dll")] private static extern bool TerminateProcess(IntPtr process, uint code);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern uint WaitForSingleObject(IntPtr handle, uint timeout);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GetExitCodeProcess(IntPtr process, out uint code);
@@ -90,9 +93,29 @@ public static class GhRunnerConsole {
         try {
             string executable = Process.GetCurrentProcess().MainModule.FileName;
             var arguments = new StringBuilder("\"" + executable + "\" -NoLogo -NoProfile -NonInteractive -EncodedCommand " + command);
-            if (!CreateProcess(executable, arguments, IntPtr.Zero, IntPtr.Zero, false, CREATE_NEW_CONSOLE | CREATE_BREAKAWAY_FROM_JOB, IntPtr.Zero, directory, ref startup, out process)) {
+            bool started = CreateProcess(executable, arguments, IntPtr.Zero, IntPtr.Zero, false, CREATE_NEW_CONSOLE | CREATE_BREAKAWAY_FROM_JOB | CREATE_SUSPENDED, IntPtr.Zero, directory, ref startup, out process);
+            if (!started) {
                 int failure = Marshal.GetLastWin32Error();
                 if (failure != 5) throw new Win32Exception(failure, "Cannot start hidden runner console");
+            } else {
+                bool inJob;
+                if (!IsProcessInJob(process.ProcessHandle, IntPtr.Zero, out inJob)) {
+                    TerminateProcess(process.ProcessHandle, 1);
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot verify runner job isolation");
+                }
+                if (inJob) {
+                    TerminateProcess(process.ProcessHandle, 1);
+                    if (WaitForSingleObject(process.ProcessHandle, 5000) != 0) throw new TimeoutException("Cannot discard attached runner host");
+                    CloseHandle(process.ThreadHandle);
+                    CloseHandle(process.ProcessHandle);
+                    process = new ProcessInfo();
+                    started = false;
+                } else if (ResumeThread(process.ThreadHandle) == uint.MaxValue) {
+                    TerminateProcess(process.ProcessHandle, 1);
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot resume runner host");
+                }
+            }
+            if (!started) {
                 process.ProcessId = (uint)detachedLaunch(arguments.ToString());
                 process.ProcessHandle = OpenProcess(0x00101001, false, process.ProcessId);
                 if (process.ProcessHandle == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot open detached runner host");
@@ -195,7 +218,8 @@ public static class GhRunnerConsole {
 }`;
 
 function consoleScript(command: string): string[] {
-  const script = `$ErrorActionPreference = 'Stop'\nAdd-Type -TypeDefinition @'\n${CONSOLE_HOST}\n'@\n${command}`;
+  const source = CONSOLE_HOST.replace(/^[ \t]+/gm, "");
+  const script = `$ErrorActionPreference = 'Stop'\nAdd-Type -TypeDefinition @'\n${source}\n'@\n${command}`;
   return ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")];
 }
 
