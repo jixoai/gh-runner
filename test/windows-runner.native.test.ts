@@ -65,6 +65,29 @@ public class MockRunner {
     await rm(directory, { recursive: true, force: true });
   });
 
+  it("PowerShell 启动参数与长编码命令兼容", async () => {
+    const results: Array<{ detached: boolean; nonInteractive: boolean; padding: number; code: number | null; output: string }> = [];
+    for (const detached of [false, true]) {
+      for (const nonInteractive of [false, true]) {
+        for (const padding of [0, 5000]) {
+          const script = `[Console]::WriteLine('ps-ready'); exit 7\n#${" ".repeat(padding)}`;
+          const args = ["-NoLogo", "-NoProfile", ...(nonInteractive ? ["-NonInteractive"] : []), "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")];
+          const shell = spawn("powershell.exe", args, { detached, windowsHide: true, stdio: "pipe" });
+          let output = "";
+          shell.stdout.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+          shell.stderr.on("data", (chunk: Buffer) => { output += chunk.toString(); });
+          const code = await new Promise<number | null>((resolve, reject) => {
+            const timeout = setTimeout(() => { shell.kill(); reject(new Error("PowerShell smoke timeout")); }, 5000);
+            shell.on("error", reject);
+            shell.on("close", (code) => { clearTimeout(timeout); resolve(code); });
+          });
+          results.push({ detached, nonInteractive, padding, code, output });
+        }
+      }
+    }
+    expect(results.every(result => result.code === 7 && result.output.includes("ps-ready")), JSON.stringify(results)).toBe(true);
+  });
+
   it("真实 Ctrl-Break 被 Runner 接收，退出后不残留会话宿主", async () => {
     const output: string[] = [];
     const runner = startRunner(directory, (stream, line) => output.push(`${stream}: ${line}`));
