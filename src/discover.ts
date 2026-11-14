@@ -8,10 +8,11 @@
  */
 
 import { readdir, readFile, realpath } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join, win32 } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { IS_WIN } from "./platform.ts";
+import { windowsRunnerHostDirectory } from "./windows-runner.ts";
 import type { InstanceConfig } from "./types.ts";
 
 const exec = promisify(execFile);
@@ -80,35 +81,48 @@ export async function discoverRunnerDirs(searchDirs: string[]): Promise<string[]
  * 全部 Runner.Listener 进程 → pid 身份（darwin/linux = cwd；win32 = 由 ExecutablePath 推导的
  * runner 目录）。身份与实例目录对账。
  */
-export async function findListenerProcesses(): Promise<Map<number, string>> {
+export async function findListenerProcesses(strict = false): Promise<Map<number, string>> {
   if (IS_WIN) {
     const result = new Map<number, string>();
+    const hosts = new Map<number, string>();
     try {
       // -EncodedCommand（UTF-16LE base64）：绕开 Node→PowerShell 的引号转义地狱——
       // -Command 里内嵌双引号经 Node 参数转义成 \" 后会被 PS 5.1 截断，静默返回空表
       //（实证：Windows 上外部 runner 识别不出，GitHub 侧在线、工具侧全停）。
       const script =
-        `Get-CimInstance Win32_Process -Filter "Name='Runner.Listener.exe'" | ` +
-        `ForEach-Object { "$($_.ProcessId)|$($_.ExecutablePath)" }`;
+        `$ErrorActionPreference = 'Stop'; [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); ` +
+        `ConvertTo-Json -Compress -InputObject @(Get-CimInstance Win32_Process ` +
+        `-Filter "Name='Runner.Listener.exe' OR Name='powershell.exe'" | ` +
+        `Select-Object ProcessId, Name, ExecutablePath, CommandLine)`;
       const encoded = Buffer.from(script, "utf16le").toString("base64");
       const { stdout } = await exec("powershell", ["-NoProfile", "-EncodedCommand", encoded], {
         timeout: 15_000,
       });
-      for (const line of stdout.split(/\r?\n/)) {
-        const m = /^(\d+)\|(.+)$/.exec(line.trim());
-        if (!m) continue;
-        // …\actions-runner\bin\Runner.Listener.exe → runner 目录是 bin 的上一级
-        result.set(Number(m[1]), dirname(dirname(m[2]!)));
+      const processes = JSON.parse(stdout.replace(/^\uFEFF/, "").trim()) as Array<{
+        ProcessId: number; Name: string; ExecutablePath: string | null; CommandLine: string | null;
+      }>;
+      for (const process of processes) {
+        if (process.Name.toLowerCase() === "powershell.exe") {
+          const directory = windowsRunnerHostDirectory(process.CommandLine ?? "");
+          if (directory) hosts.set(process.ProcessId, directory);
+        } else {
+          if (!process.ExecutablePath || !process.CommandLine) {
+            if (strict) throw new Error("无法读取 Runner 进程身份，请以相同权限运行 GH Runner");
+            continue;
+          }
+          if (!/(?:^|\s)(?:"[^"]*Runner\.Listener\.exe"|\S*Runner\.Listener\.exe)\s+run(?:\s|$)/i.test(process.CommandLine)) continue;
+          result.set(process.ProcessId, win32.dirname(win32.dirname(process.ExecutablePath)));
+        }
       }
-    } catch {
-      /* 无匹配或 PowerShell 不可用 */
+    } catch (error) {
+      if (strict) throw error;
     }
-    return result;
+    return new Map([...hosts, ...result]);
   }
 
   const result = new Map<number, string>();
   try {
-    const { stdout } = await exec("pgrep", ["-f", "Runner.Listener run"]);
+    const { stdout } = await exec("pgrep", ["-f", "Runner.Listener run|/run.sh"], { timeout: 5000 });
     const pids = stdout
       .split("\n")
       .map((s) => Number.parseInt(s.trim(), 10))
@@ -116,7 +130,7 @@ export async function findListenerProcesses(): Promise<Map<number, string>> {
     await Promise.all(
       pids.map(async (pid) => {
         try {
-          const { stdout: out } = await exec("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"]);
+          const { stdout: out } = await exec("lsof", ["-a", "-p", String(pid), "-d", "cwd", "-Fn"], { timeout: 5000 });
           for (const line of out.split("\n")) {
             if (line.startsWith("n/")) {
               // lsof 报告解析后的真实路径（/private/var/...）；统一 realpath 后与实例目录对账。
@@ -125,12 +139,15 @@ export async function findListenerProcesses(): Promise<Map<number, string>> {
             }
           }
         } catch {
-          /* 进程刚好退出 */
+          if (strict) {
+            try { process.kill(pid, 0); } catch { return; }
+            throw new Error(`无法确认存活的 Runner 进程 PID=${pid} 的目录，已取消启动以避免会话冲突`);
+          }
         }
       }),
     );
-  } catch {
-    /* pgrep 无匹配时非零退出 */
+  } catch (error) {
+    if (strict && (error as { code?: number }).code !== 1) throw error;
   }
   return result;
 }

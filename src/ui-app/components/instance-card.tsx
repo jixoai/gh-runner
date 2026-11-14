@@ -14,6 +14,8 @@ const DOT: Record<string, string> = {
   stopped: "bg-muted-foreground/60",
   starting: "bg-warn",
   stopping: "bg-warn",
+  conflict: "bg-warn",
+  unknown: "bg-warn",
 };
 
 const PILL: Record<string, string> = {
@@ -22,6 +24,8 @@ const PILL: Record<string, string> = {
   stopped: "border-border bg-secondary text-muted-foreground",
   starting: "border-transparent bg-warn/15 text-warn",
   stopping: "border-transparent bg-warn/15 text-warn",
+  conflict: "border-transparent bg-warn/15 text-warn",
+  unknown: "border-transparent bg-warn/15 text-warn",
 };
 
 export function InstanceCard({
@@ -64,7 +68,7 @@ export function InstanceCard({
     >
       <div className="flex items-center gap-2">
         <span className={cn("size-[7px] shrink-0 rounded-full", DOT[dotClass(inst)])} />
-        <span className="truncate text-sm font-semibold">{inst.name}</span>
+        <span title={inst.name} className="truncate text-sm font-semibold">{inst.name}</span>
         <Badge variant="outline" className={cn("px-2 text-[11px]", PILL[dotClass(inst)])}>
           {stateText(inst)}
         </Badge>
@@ -75,7 +79,7 @@ export function InstanceCard({
                 外部
               </Badge>
             </TooltipTrigger>
-            <TooltipContent>由其它终端/launchd 启动，非本工具拉起</TooltipContent>
+            <TooltipContent>已接入现有进程，可能由终端、系统服务或上次 GH Runner 启动</TooltipContent>
           </Tooltip>
         )}
         {!inst.configured && (
@@ -118,7 +122,7 @@ export function InstanceCard({
             <TooltipContent>在文件管理器中打开日志目录</TooltipContent>
           </Tooltip>
           <label
-            className="flex items-center gap-1 text-[11px] text-muted-foreground"
+            className="flex shrink-0 items-center gap-1 whitespace-nowrap text-[11px] text-muted-foreground"
             title="工具启动时自动拉起该实例"
           >
             <Switch
@@ -174,7 +178,7 @@ export function InstanceCard({
       </div>
 
       {inst.lastError && (
-        <div className="flex items-start gap-1.5 text-xs text-bad">
+        <div role="status" aria-live="polite" className={cn("flex items-start gap-1.5 text-xs", inst.connectionState === "conflict" ? "text-warn" : "text-bad")}>
           <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
           <span className="select-text">{inst.lastError}</span>
         </div>

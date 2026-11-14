@@ -3,27 +3,10 @@
  * 命令上行（navigator.opentray.ipc / 演示模式降级）。React 经 useSyncExternalStore 订阅。
  */
 
-import type { UiCommand, UiPush } from "../../types.ts";
+import type { InstanceView as DomainInstanceView, UiCommand, UiPush } from "../../types.ts";
 export type { UiCommand } from "../../types.ts";
 
-export interface InstanceView {
-  id: string;
-  dir: string;
-  name: string;
-  agentId: number | null;
-  orgUrl: string | null;
-  workFolder: string | null;
-  configured: boolean;
-  unregistered?: boolean;
-  processState: "stopped" | "starting" | "running" | "stopping";
-  external: boolean;
-  autoStart: boolean;
-  pid: number | null;
-  currentJob: { job: string; startedAt: string } | null;
-  lastResult: { job: string; outcome: string; at: string; durationMs: number } | null;
-  lastError: string | null;
-  logTotal: number;
-}
+export type InstanceView = Omit<DomainInstanceView, "log">;
 
 export interface PackageInfo {
   path: string;

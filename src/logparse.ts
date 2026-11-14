@@ -21,6 +21,14 @@ export interface JobEvent {
   outcome?: string;
 }
 
+export function parseConnectionLine(line: string): "online" | "conflict" | "connecting" | null {
+  const content = stripDiagPrefix(line).replaceAll(ANSI, "");
+  if (/A session for this runner already exists|TaskAgentSessionConflictException|Stop retry on SessionConflictException/.test(content)) return "conflict";
+  if (parseConsoleLine(content)) return "online";
+  if (/Runner connect error:|Attempt to create session\.|Reconnecting to the runner/.test(content)) return "connecting";
+  return null;
+}
+
 /** 日志行前缀（diag 文件形态）：`[2026-10-24 10:16:04Z INFO Terminal] WRITE LINE: `。 */
 const DIAG_PREFIX = "] WRITE LINE: ";
 

@@ -116,8 +116,18 @@ HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890 pnpm start
 | 托盘 + WebView 窗口 | ✅ WKWebView | ✅ WebView2 |
 | 包格式 | tar.gz / zip | zip / tar.gz |
 | 注册入口 | `config.sh` | `Runner.Listener configure` |
-| 启动入口 | `run.sh` | `Runner.Listener.exe run` |
-| 进程发现/终止 | pgrep + lsof(cwd) / 进程组信号 | PowerShell CIM(ExecutablePath) / `taskkill /T` |
+| 启动入口 | `run.sh` | 隐藏的 PowerShell 私有控制台 → `Runner.Listener.exe run` |
+| 进程发现/终止 | pgrep + lsof(cwd) / 进程组信号 | PowerShell CIM / Ctrl-Break 优雅退出，超时后 `taskkill /T /F` |
+
+### Runner 会话冲突与状态
+
+启动前会重新检查现有进程：同目录已运行时接入而不重复拉起，不同目录共用同一注册身份时拒绝启动。同目录的 GH Runner 启动请求通过临时启动锁互斥；进程身份无法确认时取消启动，避免盲目重复连接。
+
+Windows 受管实例拥有独立的隐藏控制台，停止时先发送 Ctrl-Break，让 Runner 取消任务并删除 GitHub 会话；至少等待 35 秒后仍未退出才强制终止。旧版本启动的无控制台进程或系统服务可能无法接收该信号，仍需强制停止，因此不能保证所有重启都不会短暂出现旧会话冲突。停止正在执行任务的实例仍会中断任务。
+
+界面区分「连接中」「会话冲突 · 重试中」「空闲」；收到 `Listening for Jobs` 或作业事件后才计入在线数量。接入已有进程但尚无新日志证据时显示「连接待确认」，不会根据历史日志假定在线。CLI JSON 输出的 `status` 表示进程状态，`connectionState` 表示 GitHub 连接状态。
+
+出现 `A session for this runner already exists` 时保留 Runner 官方每 30 秒的重试并显示处理建议，连接成功后自动清除提示。刚停止过可等待旧会话释放；持续冲突需检查 Windows 的 `actions.runner.*` 服务、其他 GH Runner 窗口和共用 `.runner` / `.credentials*` 的机器。不要反复停止启动，也不要复制注册凭据来创建多个实例。
 
 Linux：opentray 的 ext-webview/dialog 不发布 Linux 原生运行时，暂不支持。
 

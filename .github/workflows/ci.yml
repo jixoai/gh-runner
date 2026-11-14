@@ -14,7 +14,7 @@ jobs:
           # macOS：完整门禁（类型 + 测试 + 构建）
           - os: macos-latest
             full: "true"
-          # Windows：类型 + 构建门禁（E2E 依赖 POSIX 进程语义，不在 Windows 跑）
+          # Windows：类型 + 构建 + 原生控制台生命周期门禁
           - os: windows-latest
             full: "false"
     runs-on: ${{ matrix.os }}
@@ -30,3 +30,5 @@ jobs:
       - run: pnpm build
       - if: matrix.full == 'true'
         run: pnpm test
+      - if: runner.os == 'Windows'
+        run: pnpm exec vitest run test/windows-runner.native.test.ts test/windows-runner.test.ts test/supervisor.windows.test.ts test/discover.windows.test.ts test/runner-start-lock.test.ts

@@ -38,13 +38,22 @@ export function splitEventLine(line: string): { ts: string; body: string } | nul
   return m ? { ts: m[1]!, body: m[2]! } : null;
 }
 
-export function dotClass(inst: InstanceView): "busy" | "running" | "stopped" | "starting" | "stopping" {
+export function dotClass(inst: InstanceView): "busy" | "running" | "stopped" | "starting" | "stopping" | "conflict" | "unknown" {
+  if (inst.processState === "stopped" || inst.processState === "stopping") return inst.processState;
+  if (inst.connectionState === "conflict") return "conflict";
+  if (inst.connectionState === "unknown") return "unknown";
+  if (inst.connectionState !== "online") return "starting";
   if (inst.currentJob && inst.processState === "running") return "busy";
   return inst.processState;
 }
 
 export function stateText(inst: InstanceView): string {
-  if (inst.currentJob) return "作业中";
+  if (inst.processState !== "stopped" && inst.processState !== "stopping") {
+    if (inst.connectionState === "conflict") return "会话冲突 · 重试中";
+    if (inst.connectionState === "unknown") return "连接待确认";
+    if (inst.connectionState !== "online") return "连接中…";
+    if (inst.currentJob) return "作业中";
+  }
   const map = { running: "空闲", stopped: "已停止", starting: "启动中…", stopping: "停止中…" } as const;
   return map[inst.processState];
 }

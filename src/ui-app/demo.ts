@@ -4,7 +4,7 @@
  */
 
 import { store, type UiCommand } from "./lib/host";
-import type { AuthorizationState, DownloadState, RegistrationBatchState, RunnerOperationState, RunnerOperationRequest } from "../types.ts";
+import type { AuthorizationState, ConnectionState, DownloadState, RegistrationBatchState, RunnerOperationState, RunnerOperationRequest } from "../types.ts";
 import { downloadTemplateError } from "../download-source.ts";
 import { resolvePackageSelection, runnerPackageName } from "../runner-package.ts";
 
@@ -18,6 +18,7 @@ interface DemoInstance {
   configured: boolean;
   unregistered?: boolean;
   processState: "stopped" | "starting" | "running" | "stopping";
+  connectionState: ConnectionState;
   external: boolean;
   autoStart: boolean;
   pid: number | null;
@@ -38,6 +39,7 @@ const mk = (id: string, name: string, over: Partial<DemoInstance>): DemoInstance
   workFolder: "/Volumes/bnqkl/Users/kzf/gh-runner-work",
   configured: true,
   processState: "stopped",
+  connectionState: over.processState === "running" ? "online" : "disconnected",
   external: false,
   autoStart: false,
   pid: null,
@@ -150,6 +152,7 @@ export const demoHost = {
         inst.configured = command.action === "reregister";
         inst.unregistered = !inst.configured;
         inst.processState = "stopped";
+        inst.connectionState = "disconnected";
         inst.currentJob = null;
         inst.pid = null;
         inst.autoStart = false;
@@ -188,6 +191,7 @@ export const demoHost = {
       setTimeout(() => {
         const fresh = mk(`demo-${Date.now()}-${index}`, runner.name, {});
         fresh.processState = "running";
+        fresh.connectionState = "online";
         fresh.external = false;
         fresh.pid = 42000 + index;
         fresh.dir = runner.dir;
@@ -230,6 +234,7 @@ export const demoHost = {
     }
     if (cmd.type === "start" && inst) {
       inst.processState = "running";
+      inst.connectionState = "online";
       addLog(inst, ts() + " Listening for Jobs");
       setTimeout(() => {
         if (inst.processState !== "running") return;
@@ -249,6 +254,7 @@ export const demoHost = {
     }
     if (cmd.type === "stop" && inst) {
       inst.processState = "stopped";
+      inst.connectionState = "disconnected";
       inst.currentJob = null;
       inst.pid = null;
       inst.external = false;

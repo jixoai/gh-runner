@@ -3,7 +3,25 @@
  * 含 diag 包裹形态、stdout 裸形态、中文/括号/斜杠 job 名。
  */
 import { describe, expect, it } from "vitest";
-import { normalizeLine, parseConsoleLine, replayJobState, toIsoUtc } from "../src/logparse.ts";
+import { normalizeLine, parseConnectionLine, parseConsoleLine, replayJobState, toIsoUtc } from "../src/logparse.ts";
+
+describe("parseConnectionLine", () => {
+  it.each([
+    "A session for this runner already exists.",
+    "[2026-11-14 01:47:02Z ERR BrokerMessageListener] GitHub.DistributedTask.WebApi.TaskAgentSessionConflictException: Error: Conflict",
+    "Stop retry on SessionConflictException after retried for 240 seconds.",
+  ])("识别会话冲突：%s", (line) => {
+    expect(parseConnectionLine(line)).toBe("conflict");
+  });
+
+  it("只有可接收作业的事件才证明在线", () => {
+    expect(parseConnectionLine("Connected to GitHub")).toBeNull();
+    expect(parseConnectionLine("2026-11-14 01:49:48Z: Runner reconnected.")).toBeNull();
+    expect(parseConnectionLine("2026-11-14 01:49:48Z: Listening for Jobs")).toBe("online");
+    expect(parseConnectionLine("2026-11-14 01:49:48Z: Running job: build-win")).toBe("online");
+    expect(parseConnectionLine("2026-11-14 01:47:02Z: Runner connect error: Error: Conflict. Retrying until reconnected.")).toBe("connecting");
+  });
+});
 
 describe("normalizeLine", () => {
   it("剥离 diag 包裹与 ANSI", () => {

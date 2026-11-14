@@ -37,8 +37,8 @@ export function App() {
   const effectiveSelected = selected ?? instances[0]?.id ?? null;
   const selectedInst = instances.find((i) => i.id === effectiveSelected) ?? null;
 
-  const running = instances.filter((i) => i.processState === "running" || i.processState === "starting").length;
-  const busy = instances.filter((i) => i.currentJob).length;
+  const running = instances.filter((i) => i.processState === "running" && i.connectionState === "online").length;
+  const busy = instances.filter((i) => i.processState === "running" && i.connectionState === "online" && i.currentJob).length;
 
   return (
     <div className="flex h-full flex-col">

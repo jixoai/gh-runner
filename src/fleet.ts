@@ -15,7 +15,8 @@ import { existsSync } from "node:fs";
 import { realpath, rm } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { DirTail } from "./tailer.ts";
-import { normalizeLine, parseConsoleLine, stripDiagPrefix } from "./logparse.ts";
+import { normalizeLine, parseConnectionLine, parseConsoleLine, stripDiagPrefix } from "./logparse.ts";
+import { acquireRunnerStartLock } from "./runner-start-lock.ts";
 import {
   discoverRunnerDirs,
   findListenerProcesses,
@@ -46,6 +47,7 @@ import type {
   FleetTask,
   InstanceView,
   ProcessState,
+  ConnectionState,
   Snapshot,
   ToolConfig,
   AuthorizationState,
@@ -89,6 +91,10 @@ interface Rt {
   dir: string;
   meta: RunnerMeta | null;
   processState: ProcessState;
+  connectionState: ConnectionState;
+  connectionSinceMs: number;
+  connectionUpdatedMs: number;
+  startGeneration: number;
   external: boolean;
   autoStart: boolean;
   pid: number | null;
@@ -117,6 +123,7 @@ export class Fleet {
   #task: FleetTask = { kind: "none", status: "ok", message: null };
   #ticking = false;
   #persist = true;
+  #destroyed = false;
   #download: DownloadState | null = null;
   #downloadJob: PackageDownload | null = null;
   #downloadPromise: Promise<void> | null = null;
@@ -266,61 +273,117 @@ export class Fleet {
   }
 
   async start(id: string): Promise<void> {
+    if (this.#destroyed) return;
     if (this.#operationId === id) return;
     const rt = this.#rts.get(id);
     if (!rt) return;
-    if (rt.processState === "running" || rt.processState === "starting") return;
+    if (rt.processState !== "stopped") return;
     if (!rt.meta?.configured) {
       rt.lastError = "实例尚未注册（目录缺 .runner），先走注册表单";
       this.#emit();
       return;
     }
     rt.lastError = null;
-    let spawnError: Error | null = null;
-    const spawned = startRunner(
-      rt.dir,
-      (stream, line) => this.#onManagedLine(rt, stream, line),
-      (err) => {
-        spawnError = err;
-      },
-    );
-    if (!spawned) {
-      rt.lastError = "无法启动 runner（检查 run.sh / Runner.Listener.exe 是否存在且有执行权限）";
-      this.#emit();
-      return;
-    }
-    rt.child = spawned;
-    rt.pid = spawned.pid;
-    rt.external = false;
+    const generation = ++rt.startGeneration;
     rt.processState = "starting";
-    // spawn 失败只发 error+close 不发 exit——必须用 close 收尾（exit 的超集）。
-    spawned.child.on("close", (code, signal) => {
-      if (rt.child?.pid !== spawned.pid) return;
-      const graceful = rt.processState === "stopping" || signal === "SIGTERM" || code === 0;
-      rt.child = null;
-      rt.pid = null;
-      rt.processState = "stopped";
-      rt.currentJob = null;
-      rt.lastError = spawnError
-        ? `启动失败：${spawnError.message}`
-        : graceful
-          ? null
-          : `进程退出 code=${code} signal=${signal ?? "none"}（详见日志）`;
-      this.#emitSoon();
-    });
+    rt.connectionState = "connecting";
+    rt.connectionSinceMs = Date.now();
+    rt.connectionUpdatedMs = 0;
     this.#emitSoon();
+    let releaseLock: (() => Promise<void>) | null = null;
+    try {
+      releaseLock = await acquireRunnerStartLock(rt.dir);
+      if (rt.startGeneration !== generation) return;
+      const listeners = await findListenerProcesses(true);
+      if (rt.startGeneration !== generation) return;
+      const normalizePath = async (path: string): Promise<string> => {
+        const canonical = await realpath(path).catch(() => path);
+        return PLATFORM === "win32" ? canonical.replace(/\\/g, "/").toLowerCase() : canonical;
+      };
+      const directory = await normalizePath(rt.dir);
+      for (const [pid, runningDir] of listeners) {
+        if (await normalizePath(runningDir) === directory) {
+          if (rt.startGeneration !== generation) return;
+          rt.pid = pid;
+          rt.external = true;
+          rt.processState = "running";
+          rt.connectionState = "unknown";
+          this.#pushLog(rt, `已接入现有 Runner 进程 PID=${pid}，未重复启动`);
+          this.#emitSoon();
+          return;
+        }
+        const runningMeta = await readRunnerMeta(runningDir);
+        if (rt.meta.agentId !== null && rt.meta.gitHubUrl && runningMeta.agentId === rt.meta.agentId &&
+          runningMeta.gitHubUrl?.replace(/\/$/, "").toLowerCase() === rt.meta.gitHubUrl.replace(/\/$/, "").toLowerCase()) {
+          throw new Error(`同一 Runner 注册身份已在 ${runningDir} 运行（PID=${pid}）。请停止重复实例，或为不同目录分别注册`);
+        }
+      }
+      if (rt.startGeneration !== generation) return;
+      let spawnError: Error | null = null;
+      const spawned = startRunner(
+        rt.dir,
+        (stream, line) => this.#onManagedLine(rt, stream, line),
+        (err) => { spawnError = err; },
+      );
+      if (!spawned) {
+        rt.processState = "stopped";
+        rt.connectionState = "disconnected";
+        rt.lastError = "无法启动 runner（检查 run.sh / Runner.Listener.exe 是否存在且有执行权限）";
+        this.#emit();
+        return;
+      }
+      rt.child = spawned;
+      rt.pid = spawned.pid;
+      rt.external = false;
+      rt.processState = "starting";
+      spawned.child.on("close", (code, signal) => {
+        if (rt.child?.pid !== spawned.pid) return;
+        const graceful = rt.processState === "stopping" || signal === "SIGTERM" || code === 0;
+        const sessionConflict = rt.connectionState === "conflict";
+        rt.child = null;
+        rt.pid = null;
+        rt.processState = "stopped";
+        rt.connectionState = "disconnected";
+        rt.currentJob = null;
+        rt.lastError = spawnError
+          ? `启动失败：${spawnError.message}`
+          : graceful
+            ? null
+            : sessionConflict
+              ? "Runner 会话冲突重试失败，请检查 Windows 服务、其他 GH Runner 窗口或使用相同注册凭据的机器"
+              : `进程退出 code=${code} signal=${signal ?? "none"}（详见日志）`;
+        this.#emitSoon();
+      });
+      this.#emitSoon();
+    } catch (error) {
+      if (rt.startGeneration !== generation) return;
+      rt.processState = "stopped";
+      rt.connectionState = "disconnected";
+      rt.lastError = `启动已取消：${error instanceof Error ? error.message : String(error)}`;
+      this.#emitSoon();
+    } finally {
+      await releaseLock?.().catch(() => {});
+    }
   }
 
   async stop(id: string): Promise<void> {
     const rt = this.#rts.get(id);
     if (!rt) return;
     if (rt.processState !== "running" && rt.processState !== "starting") return;
-    if (rt.pid == null) return;
+    if (rt.pid == null) {
+      rt.startGeneration += 1;
+      rt.processState = "stopped";
+      rt.connectionState = "disconnected";
+      rt.lastError = null;
+      this.#emitSoon();
+      return;
+    }
     rt.processState = "stopping";
-    rt.stoppingUntilMs = Date.now() + 15_000;
+    rt.stoppingUntilMs = Date.now() + (PLATFORM === "win32" ? 60_000 : 15_000);
     this.#emit();
     const pid = rt.pid;
     const wasExternal = rt.external;
+    const previousConnection = rt.connectionState;
     if (wasExternal) {
       // pid 复用防护：终止前核对该 pid 的身份（cwd/可执行路径）仍是本实例目录。
       const identity = await pidIdentity(pid);
@@ -337,6 +400,7 @@ export class Fleet {
           rt.pid = null;
           rt.external = false;
           rt.processState = "stopped";
+          rt.connectionState = "disconnected";
           rt.currentJob = null;
           this.#emit();
           return;
@@ -346,18 +410,22 @@ export class Fleet {
         rt.pid = null;
         rt.external = false;
         rt.processState = "stopped";
+        rt.connectionState = "disconnected";
         this.#emit();
         return;
       }
     }
     const ok = await stopProcessGroup(pid, wasExternal ? 6000 : 8000);
+    rt.stoppingUntilMs = 0;
     if (wasExternal) {
       // 外部进程：无 child 事件，需手动收尾。
-      rt.external = false;
-      rt.pid = null;
+      rt.external = !ok;
+      rt.pid = ok ? null : pid;
       rt.processState = ok ? "stopped" : "running";
+      rt.connectionState = ok ? "disconnected" : previousConnection;
+      if (ok) rt.lastError = null;
       if (!ok) rt.lastError = "停止失败：进程无响应或无权限（可能由 sudo 启动）";
-      rt.currentJob = null;
+      if (ok) rt.currentJob = null;
     } else if (!ok && rt.child?.pid === pid && rt.processState === "stopping") {
       rt.processState = "running";
       rt.stoppingUntilMs = 0;
@@ -725,6 +793,8 @@ export class Fleet {
   }
 
   async destroy(): Promise<void> {
+    this.#destroyed = true;
+    for (const rt of this.#rts.values()) rt.startGeneration += 1;
     this.#authController?.abort();
     this.#downloadJob?.cancel();
     await this.#downloadPromise;
@@ -748,6 +818,10 @@ export class Fleet {
         dir,
         meta: null,
         processState: "stopped",
+        connectionState: "disconnected",
+        connectionSinceMs: Date.now(),
+        connectionUpdatedMs: 0,
+        startGeneration: 0,
         external: false,
         autoStart: false,
         pid: null,
@@ -801,6 +875,11 @@ export class Fleet {
 
   #onDiagLines(rt: Rt, lines: string[]): void {
     for (const line of lines) {
+      const timestamp = /^\[?(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})Z/.exec(line)?.[1];
+      const atMs = timestamp ? Date.parse(timestamp.replace(" ", "T") + "Z") : NaN;
+      if (atMs >= Math.floor(rt.connectionSinceMs / 1000) * 1000 && atMs >= rt.connectionUpdatedMs) {
+        this.#applyConnectionLine(rt, line, atMs);
+      }
       const event = parseConsoleLine(line);
       if (event) this.#applyJobEvent(rt, event);
       // 归一化后再入环：diag 形态与 stdout 形态的同一事件归并为一行，去重才能命中。
@@ -810,6 +889,7 @@ export class Fleet {
   }
 
   #onManagedLine(rt: Rt, stream: "stdout" | "stderr", line: string): void {
+    this.#applyConnectionLine(rt, line, Date.now());
     // 受管实例：stdout 即时回显；作业状态仍以 diag 为权威（归一化后去重避免双计）。
     const event = parseConsoleLine(line);
     if (!event) {
@@ -820,6 +900,21 @@ export class Fleet {
       rt.processState = "running";
       this.#emitSoon();
     }
+  }
+
+  #applyConnectionLine(rt: Rt, line: string, atMs: number): void {
+    if (rt.processState === "stopped" || rt.processState === "stopping") return;
+    const connection = parseConnectionLine(line);
+    if (!connection || connection === "connecting" && rt.connectionState === "conflict") return;
+    rt.connectionState = connection;
+    rt.connectionUpdatedMs = atMs;
+    if (connection === "conflict") {
+      rt.currentJob = null;
+      rt.lastError = "Runner 会话已被占用，正在每 30 秒自动重试。刚停止过可等待旧会话释放；持续冲突请检查 Windows 服务、其他 GH Runner 窗口或共用注册凭据的机器。不要反复重启";
+    } else if (connection === "online") {
+      rt.lastError = null;
+    }
+    this.#emitSoon();
   }
 
   #applyJobEvent(
@@ -886,8 +981,11 @@ export class Fleet {
       const externalPid =
         [...cwdByPid.entries()].find(([, cwd]) => norm(cwd) === rtDir)?.[0] ?? null;
       if (externalPid !== null) {
-        if (rt.processState !== "running" || rt.external !== true) {
+        if (rt.processState !== "running" || rt.external !== true || rt.pid !== externalPid) {
           rt.processState = "running";
+          rt.connectionState = "unknown";
+          rt.connectionSinceMs = Date.now();
+          rt.connectionUpdatedMs = 0;
           rt.external = true;
           rt.pid = externalPid;
           rt.lastError = null;
@@ -895,6 +993,7 @@ export class Fleet {
         }
       } else if (rt.external && rt.processState === "running" && !dirsRunning.has(rtDir)) {
         rt.processState = "stopped";
+        rt.connectionState = "disconnected";
         rt.external = false;
         rt.pid = null;
         rt.currentJob = null;
@@ -914,6 +1013,7 @@ export class Fleet {
       configured: rt.meta?.configured ?? false,
       unregistered: !rt.meta?.configured && Boolean(this.#config?.instances.find((item) => item.id === rt.id)?.unregistered),
       processState: rt.processState,
+      connectionState: rt.connectionState,
       external: rt.external,
       autoStart: rt.autoStart,
       pid: rt.pid,

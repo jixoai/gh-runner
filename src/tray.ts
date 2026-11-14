@@ -23,7 +23,12 @@ export interface TrayActions {
 
 function stateLabel(snapshot: Snapshot, index: number): string {
   const i = snapshot.instances[index]!;
-  if (i.currentJob) return `↻ ${i.currentJob.job}`;
+  if (i.processState === "running" || i.processState === "starting") {
+    if (i.connectionState === "conflict") return "会话冲突 · 重试中";
+    if (i.connectionState === "unknown") return "连接待确认";
+    if (i.connectionState !== "online") return "连接中…";
+  }
+  if (i.currentJob && i.processState === "running") return `↻ ${i.currentJob.job}`;
   switch (i.processState) {
     case "running":
       return "空闲";
@@ -57,7 +62,7 @@ export class TrayProjection {
   async update(snapshot: Snapshot): Promise<void> {
     this.#instanceIds = snapshot.instances.map((i) => i.id);
     const running = snapshot.instances.filter(
-      (i) => i.processState === "running" || i.processState === "starting",
+      (i) => i.processState === "running" && i.connectionState === "online",
     );
     const busy = running.filter((i) => i.currentJob !== null).length;
     const iconText = busy > 0 ? `▶${running.length}↻${busy}` : `▶${running.length}`;

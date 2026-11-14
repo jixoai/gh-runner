@@ -12,6 +12,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { IS_WIN, runnerSpawn } from "./platform.ts";
+import { windowsRunnerHost, windowsRunnerStop } from "./windows-runner.ts";
 
 export interface SpawnedRunner {
   pid: number;
@@ -43,8 +44,9 @@ export function startRunner(
   const exists = IS_WIN ? existsSync(entry.file) : existsSync(join(dir, "run.sh"));
   if (!exists) return null;
 
+  const host = IS_WIN ? windowsRunnerHost(dir) : entry;
   const child = IS_WIN
-    ? spawn(entry.file, entry.args, {
+    ? spawn(host.file, host.args, {
         cwd: dir,
         detached: true,
         windowsHide: true,
@@ -64,13 +66,21 @@ export function startRunner(
     onLine("stderr", `[spawn error] ${err.message}`);
   });
   if (child.pid == null) {
-    onLine("stderr", `[spawn error] 无法启动 run.sh（检查执行权限/解释器）`);
+    onLine("stderr", `[spawn error] 无法启动 ${IS_WIN ? "Windows Runner 宿主（检查 PowerShell/执行权限）" : "run.sh（检查执行权限/解释器）"}`);
     return null;
   }
   for (const stream of ["stdout", "stderr"] as const) {
+    let partial = "";
     child[stream]!.setEncoding("utf8");
     child[stream]!.on("data", (chunk: string) => {
-      for (const line of splitLines(chunk)) onLine(stream, stripAnsi(line));
+      const lines = (partial + chunk).split("\n");
+      partial = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line.trim()) onLine(stream, stripAnsi(line));
+      }
+    });
+    child[stream]!.on("end", () => {
+      for (const line of splitLines(partial)) onLine(stream, stripAnsi(line));
     });
   }
   child.unref();
@@ -98,8 +108,18 @@ export async function stopProcessGroup(pid: number, graceMs = 8000): Promise<boo
   if (initial === "dead") return true;
 
   if (IS_WIN) {
-    // Windows 没有可靠的组信号语义；Runner.Listener 收到 taskkill（无 /F）不会退，
-    // 直接树强制终止（作业中强停的代价与 darwin SIGKILL 路径一致）。
+    const stop = windowsRunnerStop(pid);
+    const helper = spawn(stop.file, stop.args, { stdio: "ignore", detached: true, windowsHide: true });
+    const sent = await new Promise<boolean>((resolve) => {
+      const timeout = setTimeout(() => { helper.kill(); resolve(false); }, 10_000);
+      helper.on("error", () => { clearTimeout(timeout); resolve(false); });
+      helper.on("close", (code) => { clearTimeout(timeout); resolve(code === 0); });
+    });
+    const gracefulDeadline = Date.now() + Math.max(graceMs, 35_000);
+    while (sent && Date.now() < gracefulDeadline && pidExists(pid) !== "dead") {
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    if (pidExists(pid) === "dead") return true;
     const tk = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
     const ok = await new Promise<boolean>((resolve) => {
       tk.on("error", () => resolve(false));

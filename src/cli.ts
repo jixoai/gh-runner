@@ -98,6 +98,7 @@ function printSnapshot(snapshot: ReturnType<Fleet["snapshot"]>, json: boolean): 
       dir: item.dir,
       target: item.orgUrl,
       status: item.processState,
+      connectionState: item.connectionState,
       configured: item.configured,
       autoStart: item.autoStart,
       pid: item.pid,
@@ -248,6 +249,10 @@ async function configureAutostart(fleet: Fleet, selector: string, enable: boolea
 
 async function runAction(fleet: Fleet, id: string, action: "start" | "stop"): Promise<void> {
   await (action === "start" ? fleet.start(id) : fleet.stop(id));
+  const runner = fleet.view(id);
+  if (runner?.lastError && (action === "start" && runner.processState === "stopped" || action === "stop" && runner.processState !== "stopped")) {
+    throw new Error(runner.lastError);
+  }
 }
 
 async function removeRunner(fleet: Fleet, selector: string): Promise<void> {
