@@ -41,8 +41,11 @@
 3. **包获取三通道**：GitHub actions/runner 官方 release（api.github.com 最新版 → 流式下载
    tmp→rename 原子落盘，进度经 snapshot.download 推送）∪ 本地导入（ext-dialog 系统文件选择框，
    路径登记进 config.importedPackages 不复制）∪ 下载缓存目录；统一 `tar -xf` 解包（bsdtar 同时
-   支持 tar.gz/zip，三平台内置）。Windows 注册走 `Runner.Listener configure` 动词、启动直跑
-   `Runner.Listener.exe run`，进程发现用 PowerShell CIM 的 ExecutablePath、终止用 `taskkill /T`。
+   支持 tar.gz/zip，三平台内置）。Windows 注册走 `Runner.Listener configure` 动词，启动由 PowerShell
+   宿主创建独立的隐藏控制台后运行 `Runner.Listener.exe run`；进程发现用 PowerShell CIM，终止先发
+   Ctrl-Break，等待会话清理后退出，超时才用 `taskkill /T /F`。PowerShell 自身不能使用 Node 的
+   `detached` 模式（Windows 实测会在执行命令前退出）；独立控制台由宿主 `AllocConsole` 创建，
+   而不是依赖 `DETACHED_PROCESS`，标准输入输出保留管道以支持启动与工具退出后的存活。
 4. **推送协议（实测教训）**：单次 evaluate ~100KB 全量快照在 WKWebView 路径上**静默失败**
    （promise resolve 但页面未执行）。故拆为 `summary`（KB 级）+ `log` 增量（按字节 ≤24KB/包）双通道；
    推送单飞串行（hello 与去抖推送并发交错会重复投递）；页面 hello → 宿主 offset 清零全量重推；

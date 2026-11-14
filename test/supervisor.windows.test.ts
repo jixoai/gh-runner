@@ -31,7 +31,7 @@ describe("Windows supervisor", () => {
     vi.mocked(spawn).mockReturnValue(child as never);
     const output = vi.fn();
     expect(startRunner("C:\\runner", output)?.pid).toBe(1234);
-    expect(spawn).toHaveBeenCalledWith("powershell.exe", expect.arrayContaining(["-EncodedCommand"]), expect.objectContaining({ detached: true, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] }));
+    expect(spawn).toHaveBeenCalledWith("powershell.exe", expect.arrayContaining(["-EncodedCommand"]), expect.objectContaining({ detached: false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] }));
     child.stdout.write("A session for this runner ");
     expect(output).not.toHaveBeenCalled();
     child.stdout.write("already exists.\r\n");
@@ -67,6 +67,7 @@ describe("Windows supervisor", () => {
     await vi.advanceTimersByTimeAsync(36_000);
     expect(await stopped).toBe(true);
     expect(vi.mocked(spawn).mock.calls[0]?.[0]).toBe("powershell.exe");
+    expect(vi.mocked(spawn).mock.calls[0]?.[2]).toMatchObject({ detached: false, stdio: "pipe" });
     expect(vi.mocked(spawn).mock.calls.some(([file]) => file === "taskkill")).toBe(!graceful);
     if (!graceful) expect(spawn).toHaveBeenLastCalledWith("taskkill", ["/pid", "1234", "/T", "/F"], expect.anything());
   });

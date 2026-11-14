@@ -12,27 +12,6 @@ const exec = promisify(execFile);
 let directory: string;
 let pid: number | undefined;
 
-vi.mock("../src/windows-runner.ts", async (original) => {
-  const module = await original<typeof import("../src/windows-runner.ts")>();
-  return {
-    ...module,
-    windowsRunnerHost: (dir: string) => {
-      const host = module.windowsRunnerHost(dir);
-      let script = Buffer.from(host.args.at(-1)!, "base64").toString("utf16le");
-      script = `[IO.File]::WriteAllText('${dir.replaceAll("'", "''")}\\powershell-trace', 'script entered')\n` + script;
-      script = script.replace("Stream output = Console.OpenStandardOutput();", 'File.WriteAllText(Path.Combine(directory, "host-trace"), "Run\\n"); Stream output = Console.OpenStandardOutput();');
-      script = script.replace("return RunListener(directory, output, error);", 'File.AppendAllText(Path.Combine(directory, "host-trace"), "Streams\\n"); return RunListener(directory, output, error);');
-      script = script.replace("byte[] message = Encoding.UTF8.GetBytes", 'File.AppendAllText(Path.Combine(directory, "host-trace"), exception.ToString()); byte[] message = Encoding.UTF8.GetBytes');
-      script = script.replace("if (!AllocConsole())", 'File.AppendAllText(Path.Combine(directory, "host-trace"), "Detached\\n"); if (!AllocConsole())');
-      script = script.replace("ShowWindow(GetConsoleWindow(), 0);", 'File.AppendAllText(Path.Combine(directory, "host-trace"), "Allocated\\n"); ShowWindow(GetConsoleWindow(), 0);');
-      script = script.replace("using (var listener = Process.Start(settings))", 'File.AppendAllText(Path.Combine(directory, "host-trace"), "Launching\\n"); using (var listener = Process.Start(settings))');
-      script = script.replace("listener.StandardInput.Close();", 'File.AppendAllText(Path.Combine(directory, "host-trace"), "Listener=" + listener.Id + "\\n"); listener.StandardInput.Close();');
-      host.args[host.args.length - 1] = Buffer.from(script, "utf16le").toString("base64");
-      return host;
-    },
-  };
-});
-
 describe.skipIf(process.platform !== "win32")("Windows native console lifecycle", () => {
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "runner-console-"));
@@ -67,7 +46,7 @@ public class MockRunner {
 
   it("PowerShell 启动参数与长编码命令兼容", async () => {
     const results: Array<{ detached: boolean; nonInteractive: boolean; padding: number; code: number | null; output: string }> = [];
-    for (const detached of [false, true]) {
+    for (const detached of [false]) {
       for (const nonInteractive of [false, true]) {
         for (const padding of [0, 5000]) {
           const script = `[Console]::WriteLine('ps-ready'); exit 7\n#${" ".repeat(padding)}`;
@@ -104,9 +83,7 @@ public class MockRunner {
         expect(await readFile(join(directory, "started"), "utf8")).toBe("ready");
       }, { timeout: 15_000 });
     } catch (error) {
-      const trace = await readFile(join(directory, "host-trace"), "utf8").catch(() => "no trace");
-      const powershellTrace = await readFile(join(directory, "powershell-trace"), "utf8").catch(() => "no PowerShell trace");
-      throw new Error(`Runner did not start. Host exit=${exitCode}. PowerShell=${powershellTrace}. Trace=${trace}. Host output:\n${output.join("\n")}`, { cause: error });
+      throw new Error(`Runner did not start. Host exit=${exitCode}. Host output:\n${output.join("\n")}`, { cause: error });
     }
     expect((await findListenerProcesses(true)).get(pid)).toBe(directory);
     expect(await stopProcessGroup(pid)).toBe(true);
@@ -117,7 +94,7 @@ public class MockRunner {
   it("管理进程退出并关闭输出管道后 Runner 仍继续运行", async () => {
     const host = windowsRunnerHost(directory);
     const script = `import { spawn } from 'node:child_process';
-const runner = spawn(${JSON.stringify(host.file)}, ${JSON.stringify(host.args)}, { cwd: ${JSON.stringify(directory)}, detached: true, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+const runner = spawn(${JSON.stringify(host.file)}, ${JSON.stringify(host.args)}, { cwd: ${JSON.stringify(directory)}, detached: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
 runner.on('error', error => { console.error(error); process.exit(1); });
 console.log(runner.pid);
 runner.unref();

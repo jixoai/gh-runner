@@ -48,7 +48,7 @@ export function startRunner(
   const child = IS_WIN
     ? spawn(host.file, host.args, {
         cwd: dir,
-        detached: true,
+        detached: false,
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
         env: { ...process.env },
@@ -109,7 +109,7 @@ export async function stopProcessGroup(pid: number, graceMs = 8000): Promise<boo
 
   if (IS_WIN) {
     const stop = windowsRunnerStop(pid);
-    const helper = spawn(stop.file, stop.args, { stdio: "pipe", detached: true, windowsHide: true });
+    const helper = spawn(stop.file, stop.args, { stdio: "pipe", detached: false, windowsHide: true });
     helper.stdout?.resume();
     helper.stderr?.resume();
     const sent = await new Promise<boolean>((resolve) => {
