@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { findListenerProcesses } from "../src/discover.ts";
 import { startRunner, stopProcessGroup } from "../src/supervisor.ts";
@@ -92,12 +93,12 @@ public class MockRunner {
   });
 
   it("管理进程退出并关闭输出管道后 Runner 仍继续运行", async () => {
-    const host = windowsRunnerHost(directory);
-    const script = `import { spawn } from 'node:child_process';
-const runner = spawn(${JSON.stringify(host.file)}, ${JSON.stringify(host.args)}, { cwd: ${JSON.stringify(directory)}, detached: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-runner.on('error', error => { console.error(error); process.exit(1); });
+    const supervisor = pathToFileURL(join(import.meta.dirname, "../src/supervisor.ts")).href;
+    const script = `import { startRunner } from ${JSON.stringify(supervisor)};
+const runner = startRunner(${JSON.stringify(directory)}, () => {});
+if (!runner) process.exit(1);
+await runner.ready;
 console.log(runner.pid);
-runner.unref();
 process.exit(0);`;
     const launcher = spawn(process.execPath, ["--input-type=module", "-e", script], { stdio: ["ignore", "pipe", "pipe"] });
     let output = "";

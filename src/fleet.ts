@@ -355,8 +355,18 @@ export class Fleet {
         this.#emitSoon();
       });
       this.#emitSoon();
+      await spawned.ready;
     } catch (error) {
       if (rt.startGeneration !== generation) return;
+      if (rt.child) {
+        if (!await stopProcessGroup(rt.child.pid)) {
+          rt.lastError = `启动未就绪且停止失败：${error instanceof Error ? error.message : String(error)}`;
+          this.#emitSoon();
+          return;
+        }
+        rt.child = null;
+        rt.pid = null;
+      }
       rt.processState = "stopped";
       rt.connectionState = "disconnected";
       rt.lastError = `启动已取消：${error instanceof Error ? error.message : String(error)}`;
@@ -795,6 +805,7 @@ export class Fleet {
   async destroy(): Promise<void> {
     this.#destroyed = true;
     for (const rt of this.#rts.values()) rt.startGeneration += 1;
+    await Promise.all([...this.#rts.values()].map((rt) => rt.child?.ready?.catch(() => {})));
     this.#authController?.abort();
     this.#downloadJob?.cancel();
     await this.#downloadPromise;

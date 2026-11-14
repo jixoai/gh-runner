@@ -47,6 +47,25 @@ describe("Windows supervisor", () => {
     }));
   });
 
+  it("收到私有控制台就绪消息后才完成启动确认", async () => {
+    const child = childProcess();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const output = vi.fn();
+    const runner = startRunner("C:\\runner", output)!;
+    child.stdout.write("[gh-runner host ready] 5678\r\n");
+    await expect(runner.ready).resolves.toBeUndefined();
+    expect(output).not.toHaveBeenCalled();
+    child.emit("close", 0);
+  });
+
+  it("宿主就绪前退出会拒绝启动确认", async () => {
+    const child = childProcess();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const runner = startRunner("C:\\runner", () => {})!;
+    child.emit("close", 1);
+    await expect(runner.ready).rejects.toThrow("就绪前退出");
+  });
+
   it.each([true, false])("先优雅停止，只有仍存活时才树强杀（优雅退出：%s）", async (graceful) => {
     vi.useFakeTimers();
     let alive = true;

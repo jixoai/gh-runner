@@ -66,6 +66,9 @@ public static class GhRunnerConsole {
         };
         using (var listener = Process.Start(settings)) {
             listener.StandardInput.Close();
+            byte[] ready = Encoding.UTF8.GetBytes("[gh-runner host ready] " + listener.Id + Environment.NewLine);
+            output.Write(ready, 0, ready.Length);
+            output.Flush();
             Task outputTask = Pump(listener.StandardOutput.BaseStream, output);
             Task errorTask = Pump(listener.StandardError.BaseStream, error);
             listener.WaitForExit();

@@ -17,6 +17,7 @@ import { windowsRunnerHost, windowsRunnerStop } from "./windows-runner.ts";
 export interface SpawnedRunner {
   pid: number;
   child: ChildProcess;
+  ready?: Promise<void>;
 }
 
 export type OutputLineSink = (stream: "stdout" | "stderr", line: string) => void;
@@ -69,6 +70,24 @@ export function startRunner(
     onLine("stderr", `[spawn error] 无法启动 ${IS_WIN ? "Windows Runner 宿主（检查 PowerShell/执行权限）" : "run.sh（检查执行权限/解释器）"}`);
     return null;
   }
+  let markReady = () => {};
+  let ready: Promise<void> | undefined;
+  if (IS_WIN) {
+    ready = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error("Windows Runner 控制台在 20 秒内未就绪"));
+        child.kill();
+      }, 20_000);
+      timeout.unref();
+      markReady = () => { clearTimeout(timeout); resolve(); };
+      child.once("error", (error) => { clearTimeout(timeout); reject(error); });
+      child.once("close", (code) => {
+        clearTimeout(timeout);
+        reject(new Error(`Windows Runner 控制台就绪前退出 code=${code}`));
+      });
+    });
+    void ready.catch(() => {});
+  }
   for (const stream of ["stdout", "stderr"] as const) {
     let partial = "";
     child[stream]!.setEncoding("utf8");
@@ -76,6 +95,10 @@ export function startRunner(
       const lines = (partial + chunk).split("\n");
       partial = lines.pop() ?? "";
       for (const line of lines) {
+        if (IS_WIN && stream === "stdout" && /^\[gh-runner host ready\] \d+/.test(line)) {
+          markReady();
+          continue;
+        }
         if (line.trim()) onLine(stream, stripAnsi(line));
       }
     });
@@ -84,7 +107,7 @@ export function startRunner(
     });
   }
   child.unref();
-  return { pid: child.pid, child };
+  return { pid: child.pid, child, ready };
 }
 
 /** kill(pid, 0) 的三态语义：dead=ESRCH，no-perm=EPERM（进程存活但无权限），alive=可管理。 */
