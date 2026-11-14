@@ -22,6 +22,7 @@ import {
   findListenerProcesses,
   instanceIdOf,
   pidIdentity,
+  processStartedAt,
   readRunnerMeta,
   type RunnerMeta,
 } from "./discover.ts";
@@ -304,10 +305,7 @@ export class Fleet {
       for (const [pid, runningDir] of listeners) {
         if (await normalizePath(runningDir) === directory) {
           if (rt.startGeneration !== generation) return;
-          rt.pid = pid;
-          rt.external = true;
-          rt.processState = "running";
-          rt.connectionState = "unknown";
+          await this.#attachExternal(rt, pid);
           this.#pushLog(rt, `已接入现有 Runner 进程 PID=${pid}，未重复启动`);
           this.#emitSoon();
           return;
@@ -935,17 +933,21 @@ export class Fleet {
 
   #onDiagLines(rt: Rt, lines: string[]): void {
     for (const line of lines) {
-      const timestamp = /^\[?(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})Z/.exec(line)?.[1];
-      const atMs = timestamp ? Date.parse(timestamp.replace(" ", "T") + "Z") : NaN;
-      if (atMs >= Math.floor(rt.connectionSinceMs / 1000) * 1000 && atMs >= rt.connectionUpdatedMs) {
-        this.#applyConnectionLine(rt, line, atMs);
-      }
+      this.#applyDiagConnectionLine(rt, line);
       const event = parseConsoleLine(line);
       if (event) this.#applyJobEvent(rt, event);
       // 归一化后再入环：diag 形态与 stdout 形态的同一事件归并为一行，去重才能命中。
       this.#pushLog(rt, normalizeLine(line) ?? stripDiagPrefix(line));
     }
     this.#emitSoon();
+  }
+
+  #applyDiagConnectionLine(rt: Rt, line: string): void {
+    const timestamp = /^\[?(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})Z/.exec(line)?.[1];
+    const atMs = timestamp ? Date.parse(timestamp.replace(" ", "T") + "Z") : NaN;
+    if (atMs >= Math.floor(rt.connectionSinceMs / 1000) * 1000 && atMs >= rt.connectionUpdatedMs) {
+      this.#applyConnectionLine(rt, line, atMs);
+    }
   }
 
   #onManagedLine(rt: Rt, stream: "stdout" | "stderr", line: string): void {
@@ -1044,14 +1046,7 @@ export class Fleet {
         [...cwdByPid.entries()].find(([, cwd]) => norm(cwd) === rtDir)?.[0] ?? null;
       if (externalPid !== null) {
         if (rt.processState !== "running" || rt.external !== true || rt.pid !== externalPid) {
-          rt.processState = "running";
-          rt.connectionState = "unknown";
-          rt.connectionSinceMs = Date.now();
-          rt.connectionUpdatedMs = 0;
-          rt.external = true;
-          rt.pid = externalPid;
-          rt.lastError = null;
-          this.#emitSoon();
+          await this.#attachExternal(rt, externalPid);
         }
       } else if (rt.external && rt.processState === "running" && !dirsRunning.has(rtDir)) {
         if (rt.pid !== null && !cwdByPid.has(rt.pid) && pidExists(rt.pid) !== "dead") continue;
@@ -1063,6 +1058,25 @@ export class Fleet {
         this.#emitSoon();
       }
     }
+  }
+
+  async #attachExternal(rt: Rt, pid: number): Promise<void> {
+    const generation = rt.startGeneration;
+    rt.processState = "running";
+    rt.connectionState = "unknown";
+    rt.connectionSinceMs = Date.now();
+    rt.connectionUpdatedMs = 0;
+    rt.external = true;
+    rt.pid = pid;
+    rt.lastError = null;
+    this.#emitSoon();
+    const startedAt = await processStartedAt(pid);
+    if (this.#destroyed || rt.startGeneration !== generation || rt.child || rt.pid !== pid || !rt.external || rt.processState !== "running") return;
+    if (startedAt !== null && startedAt <= Date.now()) {
+      rt.connectionSinceMs = startedAt;
+      for (const line of rt.log) this.#applyDiagConnectionLine(rt, line);
+    }
+    this.#emitSoon();
   }
 
   #view(rt: Rt): InstanceView {

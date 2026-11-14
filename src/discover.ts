@@ -164,3 +164,21 @@ export async function pidIdentity(pid: number): Promise<string | null> {
   const all = await findListenerProcesses();
   return all.get(pid) ?? null;
 }
+
+export async function processStartedAt(pid: number): Promise<number | null> {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return null;
+  try {
+    if (IS_WIN) {
+      const script = `$ErrorActionPreference = 'Stop'; $process = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; if ($null -ne $process.CreationDate) { ([DateTimeOffset]$process.CreationDate).ToUnixTimeMilliseconds() }`;
+      const encoded = Buffer.from(script, "utf16le").toString("base64");
+      const { stdout } = await exec("powershell", ["-NoProfile", "-EncodedCommand", encoded], { timeout: 5000, windowsHide: true });
+      const timestamp = Number(stdout.replace(/^\uFEFF/, "").trim());
+      return Number.isSafeInteger(timestamp) && timestamp > 0 ? timestamp : null;
+    }
+    const { stdout } = await exec("ps", ["-p", String(pid), "-o", "lstart="], { timeout: 5000, env: { ...process.env, LC_ALL: "C" } });
+    const timestamp = Date.parse(stdout.trim());
+    return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
+  } catch {
+    return null;
+  }
+}

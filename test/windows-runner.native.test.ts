@@ -37,6 +37,9 @@ public class MockRunner {
     Array.Resize(ref consoleProcesses, (int)consoleProcessCount);
     File.WriteAllText("console-state", window.ToInt64() + "\\n" + IsWindowVisible(window) + "\\n" + string.Join(",", consoleProcesses));
     File.WriteAllText("started", "ready");
+    Directory.CreateDirectory("_diag");
+    string timestamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+    File.WriteAllText(Path.Combine("_diag", "Runner_native.log"), "[" + timestamp + "Z INFO Terminal] WRITE LINE: " + timestamp + "Z: Listening for Jobs" + Environment.NewLine);
     while (true) {
       Console.WriteLine(DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss") + "Z: Listening for Jobs");
       Thread.Sleep(100);
@@ -145,6 +148,9 @@ try {
   await fleet.boot({ autoStart: false, persist: false });
   const instance = fleet.snapshot().instances[0];
   if (!instance || instance.processState !== 'running') throw new Error('Runner was not rediscovered: ' + JSON.stringify(fleet.snapshot().instances));
+  const deadline = Date.now() + 5000;
+  while (fleet.view(instance.id)?.connectionState !== 'online' && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
+  if (fleet.view(instance.id)?.connectionState !== 'online') throw new Error('Current runner connection was not restored: ' + JSON.stringify(fleet.view(instance.id)));
   await fleet.stop(instance.id);
   if (fleet.view(instance.id)?.processState !== 'stopped') throw new Error('Runner did not stop');
 } finally { await fleet.destroy(); }`;

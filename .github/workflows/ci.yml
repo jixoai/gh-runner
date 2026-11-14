@@ -31,4 +31,4 @@ jobs:
       - if: matrix.full == 'true'
         run: pnpm test
       - if: runner.os == 'Windows'
-        run: pnpm exec vitest run test/windows-runner.native.test.ts test/windows-runner.test.ts test/supervisor.windows.test.ts test/discover.windows.test.ts test/fleet-windows-stop.test.ts test/runner-start-lock.test.ts
+        run: pnpm exec vitest run test/windows-runner.native.test.ts test/windows-runner.test.ts test/supervisor.windows.test.ts test/discover.windows.test.ts test/discover-process-start.test.ts test/fleet-windows-stop.test.ts test/fleet-connection.test.ts test/runner-start-lock.test.ts

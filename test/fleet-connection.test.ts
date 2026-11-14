@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OutputLineSink } from "../src/supervisor.ts";
 
-const isolated = vi.hoisted(() => ({ root: "", onLines: null as null | ((lines: string[]) => void) }));
+const isolated = vi.hoisted(() => ({ root: "", initialLines: [] as string[], onLines: null as null | ((lines: string[]) => void) }));
 vi.mock("../src/config.ts", async (original) => ({
   ...await original<typeof import("../src/config.ts")>(),
   configDir: () => isolated.root,
@@ -15,18 +15,19 @@ vi.mock("../src/config.ts", async (original) => ({
 vi.mock("../src/discover.ts", async (original) => ({
   ...await original<typeof import("../src/discover.ts")>(),
   findListenerProcesses: vi.fn(async () => new Map<number, string>()),
+  processStartedAt: vi.fn(async (): Promise<number | null> => null),
 }));
 vi.mock("../src/supervisor.ts", () => ({ startRunner: vi.fn(), stopProcessGroup: vi.fn(), pidExists: vi.fn(() => "alive") }));
 vi.mock("../src/packages.ts", () => ({ listPackages: vi.fn(async () => []), PackageDownload: vi.fn() }));
 vi.mock("../src/tailer.ts", () => ({
   DirTail: class {
-    start(onLines: (lines: string[]) => void) { isolated.onLines = onLines; }
+    start(onLines: (lines: string[]) => void) { isolated.onLines = onLines; onLines(isolated.initialLines); }
     stop() {}
   },
 }));
 
 import { Fleet } from "../src/fleet.ts";
-import { findListenerProcesses } from "../src/discover.ts";
+import { findListenerProcesses, processStartedAt } from "../src/discover.ts";
 import { startRunner, stopProcessGroup } from "../src/supervisor.ts";
 
 let fleet: Fleet;
@@ -35,6 +36,8 @@ let child: EventEmitter;
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  isolated.initialLines = [];
+  vi.mocked(processStartedAt).mockResolvedValue(null);
   isolated.root = await mkdtemp(join(tmpdir(), "runner-connection-"));
   await writeFile(join(isolated.root, ".runner"), JSON.stringify({ agentId: 114, agentName: "runner", gitHubUrl: "https://github.com/jixoai", workFolder: "_work" }));
   child = new EventEmitter();
@@ -89,6 +92,73 @@ describe("Runner connection and startup guards", () => {
     expect(startRunner).not.toHaveBeenCalled();
     expect(findListenerProcesses).toHaveBeenLastCalledWith(true);
     expect(view()).toMatchObject({ processState: "running", connectionState: "unknown", external: true, pid: 1234 });
+  });
+
+  it("重启管理器时从当前存活进程的日志恢复在线，不等待新的 Listening 行", async () => {
+    await fleet.destroy();
+    const startedAt = Date.now() - 60_000;
+    const timestamp = new Date(startedAt + 1000).toISOString().slice(0, 19).replace("T", " ");
+    isolated.initialLines = [`[${timestamp}Z INFO Terminal] WRITE LINE: ${timestamp}Z: Listening for Jobs`];
+    vi.mocked(processStartedAt).mockResolvedValue(startedAt);
+    vi.mocked(findListenerProcesses).mockResolvedValue(new Map([[1234, await realpath(isolated.root)]]));
+    fleet = new Fleet();
+    await fleet.boot({ autoStart: false, persist: false });
+    expect(view()).toMatchObject({ processState: "running", connectionState: "online", external: true, pid: 1234 });
+    expect(startRunner).not.toHaveBeenCalled();
+  });
+
+  it("接入后的回读日志只接受当前进程启动后的连接事件", async () => {
+    const startedAt = Date.now() - 60_000;
+    vi.mocked(processStartedAt).mockResolvedValue(startedAt);
+    vi.mocked(findListenerProcesses).mockResolvedValue(new Map([[1234, await realpath(isolated.root)]]));
+    await fleet.start(view().id);
+    const stale = new Date(startedAt - 5000).toISOString().slice(0, 19).replace("T", " ");
+    isolated.onLines!([`${stale}Z: Listening for Jobs`]);
+    expect(view().connectionState).toBe("unknown");
+    const current = new Date(startedAt + 1000).toISOString().slice(0, 19).replace("T", " ");
+    isolated.onLines!([`${current}Z: Listening for Jobs`]);
+    expect(view().connectionState).toBe("online");
+  });
+
+  it("当前进程日志中更晚的会话冲突不能被更早的在线记录覆盖", async () => {
+    await fleet.destroy();
+    const startedAt = Date.now() - 60_000;
+    const online = new Date(startedAt + 1000).toISOString().slice(0, 19).replace("T", " ");
+    const conflict = new Date(startedAt + 5000).toISOString().slice(0, 19).replace("T", " ");
+    isolated.initialLines = [`[${conflict}Z ERR Terminal] WRITE ERROR: A session for this runner already exists.`, `${online}Z: Listening for Jobs`];
+    vi.mocked(processStartedAt).mockResolvedValue(startedAt);
+    vi.mocked(findListenerProcesses).mockResolvedValue(new Map([[1234, await realpath(isolated.root)]]));
+    fleet = new Fleet();
+    await fleet.boot({ autoStart: false, persist: false });
+    expect(view()).toMatchObject({ connectionState: "conflict", lastError: expect.stringContaining("会话已被占用") });
+  });
+
+  it("读不到当前进程启动时间时不根据旧日志猜测在线", async () => {
+    await fleet.destroy();
+    isolated.initialLines = ["2026-10-24 01:49:48Z: Listening for Jobs"];
+    vi.mocked(findListenerProcesses).mockResolvedValue(new Map([[1234, await realpath(isolated.root)]]));
+    fleet = new Fleet();
+    await fleet.boot({ autoStart: false, persist: false });
+    expect(view()).toMatchObject({ processState: "running", connectionState: "unknown", external: true });
+  });
+
+  it("读取启动时间期间停止的 Runner 不会被日志回放重新标记在线", async () => {
+    const startedAt = Date.now() - 60_000;
+    const timestamp = new Date(startedAt + 1000).toISOString().slice(0, 19).replace("T", " ");
+    isolated.onLines!([`${timestamp}Z: Listening for Jobs`]);
+    let finishTimestamp!: (timestamp: number) => void;
+    vi.mocked(processStartedAt).mockImplementationOnce(() => new Promise((resolve) => { finishTimestamp = resolve; }));
+    vi.mocked(findListenerProcesses).mockResolvedValue(new Map([[1234, await realpath(isolated.root)]]));
+    const starting = fleet.start(view().id);
+    await vi.waitFor(() => expect(processStartedAt).toHaveBeenCalledWith(1234));
+    vi.mocked(stopProcessGroup).mockImplementationOnce(async () => {
+      vi.mocked(findListenerProcesses).mockResolvedValue(new Map());
+      return true;
+    });
+    await fleet.stop(view().id);
+    finishTimestamp(startedAt);
+    await starting;
+    expect(view()).toMatchObject({ processState: "stopped", connectionState: "disconnected", pid: null });
   });
 
   it("并发启动请求只创建一个进程，并释放启动锁", async () => {

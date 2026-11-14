@@ -8,7 +8,7 @@ vi.mock("node:child_process", async (original) => {
 });
 vi.mock("../src/platform.ts", () => ({ IS_WIN: true }));
 
-import { findListenerProcesses } from "../src/discover.ts";
+import { findListenerProcesses, processStartedAt } from "../src/discover.ts";
 
 beforeEach(() => { vi.clearAllMocks(); });
 
@@ -47,5 +47,34 @@ describe("Windows listener discovery", () => {
     expect(await findListenerProcesses(true)).toEqual(new Map());
     io.exec.mockRejectedValue(new Error("PowerShell unavailable"));
     await expect(findListenerProcesses(true)).rejects.toThrow("PowerShell unavailable");
+  });
+});
+
+describe("Windows process start time", () => {
+  it("从当前 PID 的 CreationDate 获取启动时间且不弹出探测窗口", async () => {
+    const timestamp = Date.UTC(2026, 10, 14, 6, 19, 31);
+    io.exec.mockResolvedValue({ stdout: `\uFEFF${timestamp}\r\n` });
+    expect(await processStartedAt(1234)).toBe(timestamp);
+    const args = io.exec.mock.calls[0]?.[1] as string[];
+    const script = Buffer.from(args.at(-1)!, "base64").toString("utf16le");
+    expect(script).toContain('ProcessId=1234');
+    expect(script).toContain("CreationDate");
+    expect(script).toContain("ToUnixTimeMilliseconds");
+    expect(io.exec.mock.calls[0]?.[2]).toMatchObject({ windowsHide: true, timeout: 5000 });
+  });
+
+  it.each(["", "null", "invalid", "0", "-1"])("进程不存在或返回无效时间时返回 null：%s", async (stdout) => {
+    io.exec.mockResolvedValue({ stdout });
+    expect(await processStartedAt(1234)).toBeNull();
+  });
+
+  it("无权限读取启动时间时不猜测", async () => {
+    io.exec.mockRejectedValue(new Error("Access denied"));
+    expect(await processStartedAt(1234)).toBeNull();
+  });
+
+  it.each([0, -1, 1.5, NaN])("无效 PID 不执行命令：%s", async (pid) => {
+    expect(await processStartedAt(pid)).toBeNull();
+    expect(io.exec).not.toHaveBeenCalled();
   });
 });

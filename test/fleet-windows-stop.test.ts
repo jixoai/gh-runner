@@ -18,6 +18,7 @@ vi.mock("../src/platform.ts", async (original) => ({
 vi.mock("../src/discover.ts", async (original) => ({
   ...await original<typeof import("../src/discover.ts")>(),
   findListenerProcesses: vi.fn(),
+  processStartedAt: vi.fn(async () => null),
 }));
 vi.mock("../src/supervisor.ts", () => ({ startRunner: vi.fn(), stopProcessGroup: vi.fn(), pidExists: vi.fn() }));
 vi.mock("../src/packages.ts", () => ({ listPackages: vi.fn(async () => []), PackageDownload: vi.fn() }));
