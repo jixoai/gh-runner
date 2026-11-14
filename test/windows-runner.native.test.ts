@@ -12,6 +12,26 @@ const exec = promisify(execFile);
 let directory: string;
 let pid: number | undefined;
 
+vi.mock("../src/windows-runner.ts", async (original) => {
+  const module = await original<typeof import("../src/windows-runner.ts")>();
+  return {
+    ...module,
+    windowsRunnerHost: (dir: string) => {
+      const host = module.windowsRunnerHost(dir);
+      let script = Buffer.from(host.args.at(-1)!, "base64").toString("utf16le");
+      script = script.replace("Stream output = Console.OpenStandardOutput();", 'File.WriteAllText(Path.Combine(directory, "host-trace"), "Run\\n"); Stream output = Console.OpenStandardOutput();');
+      script = script.replace("return RunListener(directory, output, error);", 'File.AppendAllText(Path.Combine(directory, "host-trace"), "Streams\\n"); return RunListener(directory, output, error);');
+      script = script.replace("byte[] message = Encoding.UTF8.GetBytes", 'File.AppendAllText(Path.Combine(directory, "host-trace"), exception.ToString()); byte[] message = Encoding.UTF8.GetBytes');
+      script = script.replace("if (!AllocConsole())", 'File.AppendAllText(Path.Combine(directory, "host-trace"), "Detached\\n"); if (!AllocConsole())');
+      script = script.replace("ShowWindow(GetConsoleWindow(), 0);", 'File.AppendAllText(Path.Combine(directory, "host-trace"), "Allocated\\n"); ShowWindow(GetConsoleWindow(), 0);');
+      script = script.replace("using (var listener = Process.Start(settings))", 'File.AppendAllText(Path.Combine(directory, "host-trace"), "Launching\\n"); using (var listener = Process.Start(settings))');
+      script = script.replace("listener.StandardInput.Close();", 'File.AppendAllText(Path.Combine(directory, "host-trace"), "Listener=" + listener.Id + "\\n"); listener.StandardInput.Close();');
+      host.args[host.args.length - 1] = Buffer.from(script, "utf16le").toString("base64");
+      return host;
+    },
+  };
+});
+
 describe.skipIf(process.platform !== "win32")("Windows native console lifecycle", () => {
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "runner-console-"));
@@ -60,7 +80,8 @@ public class MockRunner {
         expect(await readFile(join(directory, "started"), "utf8")).toBe("ready");
       }, { timeout: 15_000 });
     } catch (error) {
-      throw new Error(`Runner did not start. Host exit=${exitCode}. Host output:\n${output.join("\n")}`, { cause: error });
+      const trace = await readFile(join(directory, "host-trace"), "utf8").catch(() => "no trace");
+      throw new Error(`Runner did not start. Host exit=${exitCode}. Trace=${trace}. Host output:\n${output.join("\n")}`, { cause: error });
     }
     expect((await findListenerProcesses(true)).get(pid)).toBe(directory);
     expect(await stopProcessGroup(pid)).toBe(true);
