@@ -50,7 +50,7 @@ export function startRunner(
         cwd: dir,
         detached: true,
         windowsHide: true,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["pipe", "pipe", "pipe"],
         env: { ...process.env },
       })
     : spawn(entry.file, entry.args, {

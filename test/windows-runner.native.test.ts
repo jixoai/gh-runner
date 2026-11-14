@@ -94,7 +94,7 @@ public class MockRunner {
   it("管理进程退出并关闭输出管道后 Runner 仍继续运行", async () => {
     const host = windowsRunnerHost(directory);
     const script = `import { spawn } from 'node:child_process';
-const runner = spawn(${JSON.stringify(host.file)}, ${JSON.stringify(host.args)}, { cwd: ${JSON.stringify(directory)}, detached: true, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+const runner = spawn(${JSON.stringify(host.file)}, ${JSON.stringify(host.args)}, { cwd: ${JSON.stringify(directory)}, detached: true, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
 runner.on('error', error => { console.error(error); process.exit(1); });
 console.log(runner.pid);
 runner.unref();
