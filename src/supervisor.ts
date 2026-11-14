@@ -109,7 +109,9 @@ export async function stopProcessGroup(pid: number, graceMs = 8000): Promise<boo
 
   if (IS_WIN) {
     const stop = windowsRunnerStop(pid);
-    const helper = spawn(stop.file, stop.args, { stdio: "ignore", detached: true, windowsHide: true });
+    const helper = spawn(stop.file, stop.args, { stdio: "pipe", detached: true, windowsHide: true });
+    helper.stdout?.resume();
+    helper.stderr?.resume();
     const sent = await new Promise<boolean>((resolve) => {
       const timeout = setTimeout(() => { helper.kill(); resolve(false); }, 10_000);
       helper.on("error", () => { clearTimeout(timeout); resolve(false); });
