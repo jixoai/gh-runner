@@ -19,6 +19,7 @@ vi.mock("../src/windows-runner.ts", async (original) => {
     windowsRunnerHost: (dir: string) => {
       const host = module.windowsRunnerHost(dir);
       let script = Buffer.from(host.args.at(-1)!, "base64").toString("utf16le");
+      script = `[IO.File]::WriteAllText('${dir.replaceAll("'", "''")}\\powershell-trace', 'script entered')\n` + script;
       script = script.replace("Stream output = Console.OpenStandardOutput();", 'File.WriteAllText(Path.Combine(directory, "host-trace"), "Run\\n"); Stream output = Console.OpenStandardOutput();');
       script = script.replace("return RunListener(directory, output, error);", 'File.AppendAllText(Path.Combine(directory, "host-trace"), "Streams\\n"); return RunListener(directory, output, error);');
       script = script.replace("byte[] message = Encoding.UTF8.GetBytes", 'File.AppendAllText(Path.Combine(directory, "host-trace"), exception.ToString()); byte[] message = Encoding.UTF8.GetBytes');
@@ -81,7 +82,8 @@ public class MockRunner {
       }, { timeout: 15_000 });
     } catch (error) {
       const trace = await readFile(join(directory, "host-trace"), "utf8").catch(() => "no trace");
-      throw new Error(`Runner did not start. Host exit=${exitCode}. Trace=${trace}. Host output:\n${output.join("\n")}`, { cause: error });
+      const powershellTrace = await readFile(join(directory, "powershell-trace"), "utf8").catch(() => "no PowerShell trace");
+      throw new Error(`Runner did not start. Host exit=${exitCode}. PowerShell=${powershellTrace}. Trace=${trace}. Host output:\n${output.join("\n")}`, { cause: error });
     }
     expect((await findListenerProcesses(true)).get(pid)).toBe(directory);
     expect(await stopProcessGroup(pid)).toBe(true);
