@@ -3,6 +3,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading.Tasks;
 
 public static class GhRunnerConsole {
@@ -35,6 +36,19 @@ public static class GhRunnerConsole {
     public static int Run(string directory) {
         Stream output = Console.OpenStandardOutput();
         Stream error = Console.OpenStandardError();
+        try {
+            return RunListener(directory, output, error);
+        } catch (Exception exception) {
+            byte[] message = Encoding.UTF8.GetBytes("[runner host error] " + exception + Environment.NewLine);
+            try {
+                error.Write(message, 0, message.Length);
+                error.Flush();
+            } catch (IOException) {}
+            return 1;
+        }
+    }
+
+    private static int RunListener(string directory, Stream output, Stream error) {
         FreeConsole();
         if (!AllocConsole()) throw new InvalidOperationException("Cannot allocate runner console");
         ShowWindow(GetConsoleWindow(), 0);

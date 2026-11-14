@@ -49,11 +49,18 @@ public class MockRunner {
     const runner = startRunner(directory, (stream, line) => output.push(`${stream}: ${line}`));
     expect(runner).not.toBeNull();
     pid = runner!.pid;
-    const closed = new Promise<number | null>((resolve) => runner!.child.on("close", resolve));
+    let exitCode: number | null | undefined;
+    const closed = new Promise<number | null>((resolve) => runner!.child.on("close", (code) => {
+      exitCode = code;
+      resolve(code);
+    }));
     try {
-      await vi.waitFor(async () => expect(await readFile(join(directory, "started"), "utf8")).toBe("ready"), { timeout: 15_000 });
+      await vi.waitFor(async () => {
+        if (exitCode !== undefined) throw new Error(`Host exited ${exitCode}`);
+        expect(await readFile(join(directory, "started"), "utf8")).toBe("ready");
+      }, { timeout: 15_000 });
     } catch (error) {
-      throw new Error(`Runner did not start. Host output:\n${output.join("\n")}`, { cause: error });
+      throw new Error(`Runner did not start. Host exit=${exitCode}. Host output:\n${output.join("\n")}`, { cause: error });
     }
     expect((await findListenerProcesses(true)).get(pid)).toBe(directory);
     expect(await stopProcessGroup(pid)).toBe(true);
