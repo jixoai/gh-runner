@@ -13,6 +13,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { IS_WIN } from "./platform.ts";
 import { windowsRunnerHostDirectory } from "./windows-runner.ts";
+import { windowsProcessQuery } from "./windows-process.ts";
 import type { InstanceConfig } from "./types.ts";
 
 const exec = promisify(execFile);
@@ -86,16 +87,8 @@ export async function findListenerProcesses(strict = false): Promise<Map<number,
     const result = new Map<number, string>();
     const hosts = new Map<number, string>();
     try {
-      // -EncodedCommand（UTF-16LE base64）：绕开 Node→PowerShell 的引号转义地狱——
-      // -Command 里内嵌双引号经 Node 参数转义成 \" 后会被 PS 5.1 截断，静默返回空表
-      //（实证：Windows 上外部 runner 识别不出，GitHub 侧在线、工具侧全停）。
-      const script =
-        `$ErrorActionPreference = 'Stop'; [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false); ` +
-        `ConvertTo-Json -Compress -InputObject @(Get-CimInstance Win32_Process ` +
-        `-Filter "Name='Runner.Listener.exe' OR Name='powershell.exe'" | ` +
-        `Select-Object ProcessId, Name, ExecutablePath, CommandLine)`;
-      const encoded = Buffer.from(script, "utf16le").toString("base64");
-      const { stdout } = await exec("powershell", ["-NoProfile", "-EncodedCommand", encoded], {
+      const query = windowsProcessQuery();
+      const { stdout } = await exec(query.file, query.args, {
         timeout: 15_000,
         windowsHide: true,
       });
@@ -169,9 +162,8 @@ export async function processStartedAt(pid: number): Promise<number | null> {
   if (!Number.isSafeInteger(pid) || pid <= 0) return null;
   try {
     if (IS_WIN) {
-      const script = `$ErrorActionPreference = 'Stop'; $process = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; if ($null -ne $process.CreationDate) { ([DateTimeOffset]$process.CreationDate).ToUnixTimeMilliseconds() }`;
-      const encoded = Buffer.from(script, "utf16le").toString("base64");
-      const { stdout } = await exec("powershell", ["-NoProfile", "-EncodedCommand", encoded], { timeout: 5000, windowsHide: true });
+      const query = windowsProcessQuery(pid);
+      const { stdout } = await exec(query.file, query.args, { timeout: 5000, windowsHide: true });
       const timestamp = Number(stdout.replace(/^\uFEFF/, "").trim());
       return Number.isSafeInteger(timestamp) && timestamp > 0 ? timestamp : null;
     }

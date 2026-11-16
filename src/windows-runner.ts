@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { WINDOWS_COMMAND_LINE_SOURCE } from "./windows-process.ts";
 
 const CONSOLE_HOST = String.raw`
 using System;
@@ -217,8 +218,8 @@ public static class GhRunnerConsole {
     }
 }`;
 
-function consoleScript(command: string): string[] {
-  const source = CONSOLE_HOST.replace(/^[ \t]+/gm, "");
+function consoleScript(command: string, extraSource = ""): string[] {
+  const source = `${CONSOLE_HOST}\n${extraSource}`.replace(/^[ \t]+/gm, "");
   const script = `$ErrorActionPreference = 'Stop'\nAdd-Type -TypeDefinition @'\n${source}\n'@\n${command}`;
   return ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")];
 }
@@ -255,12 +256,12 @@ export function windowsRunnerStop(pid: number): { file: string; args: string[] }
   return {
     file: "powershell.exe",
     args: consoleScript(`$privateConsole = $false
-$target = Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"
-if ($target.CommandLine -match '-EncodedCommand\\s+([a-zA-Z0-9+/=]+)') {
+$commandLine = [GhRunnerCommandLine]::Read(${pid})
+if ($commandLine -match '-EncodedCommand\\s+([a-zA-Z0-9+/=]+)') {
   $decoded = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($Matches[1]))
   $privateConsole = $decoded.Contains('exit [GhRunnerConsole]::Run(')
 }
-if ([GhRunnerConsole]::Stop(${pid}, $privateConsole)) { exit 0 } else { exit 1 }`),
+if ([GhRunnerConsole]::Stop(${pid}, $privateConsole)) { exit 0 } else { exit 1 }`, WINDOWS_COMMAND_LINE_SOURCE),
   };
 }
 

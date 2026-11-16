@@ -52,7 +52,10 @@ describe("Windows runner console host", () => {
   it("只对私有控制台广播 Ctrl-Break，普通终端只定向发送", () => {
     const stop = windowsRunnerStop(1234);
     const script = Buffer.from(stop.args.at(-1)!, "base64").toString("utf16le");
-    expect(script).toContain("ProcessId=1234");
+    expect(script).toContain("[GhRunnerCommandLine]::Read(1234)");
+    expect(script).toContain("NtQueryInformationProcess");
+    expect(script).not.toMatch(/Get-CimInstance|Get-WmiObject/);
+    expect(stop.args.join(" ").length + 200).toBeLessThan(32767);
     expect(script).toContain("GenerateConsoleCtrlEvent(1, privateConsole ? 0 : processId)");
     expect(script).toContain("$privateConsole = $false");
     expect(windowsRunnerHostDirectory(stop.args.join(" "))).toBeNull();

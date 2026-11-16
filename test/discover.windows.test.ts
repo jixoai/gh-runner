@@ -25,7 +25,13 @@ describe("Windows listener discovery", () => {
     const args = io.exec.mock.calls[0]?.[1] as string[];
     const script = Buffer.from(args.at(-1)!, "base64").toString("utf16le");
     expect(script).toContain("UTF8Encoding");
-    expect(io.exec.mock.calls[0]?.[2]).toMatchObject({ windowsHide: true });
+    expect(script).toContain("CreateToolhelp32Snapshot");
+    expect(script).toContain("QueryFullProcessImageNameW");
+    expect(script).toContain("NtQueryInformationProcess");
+    expect(script).not.toMatch(/Get-CimInstance|Get-WmiObject|Get-Process|tasklist/i);
+    expect(io.exec.mock.calls[0]?.[0]).toBe("powershell.exe");
+    expect(args).toContain("-NonInteractive");
+    expect(io.exec.mock.calls[0]?.[2]).toMatchObject({ windowsHide: true, timeout: 15_000 });
   });
 
   it("忽略配置进程和普通 PowerShell", async () => {
@@ -48,18 +54,25 @@ describe("Windows listener discovery", () => {
     io.exec.mockRejectedValue(new Error("PowerShell unavailable"));
     await expect(findListenerProcesses(true)).rejects.toThrow("PowerShell unavailable");
   });
+
+  it("进程查询超时不会成为允许重复启动的空列表", async () => {
+    io.exec.mockRejectedValue(Object.assign(new Error("Process query timed out"), { killed: true, signal: "SIGTERM" }));
+    await expect(findListenerProcesses(true)).rejects.toThrow("Process query timed out");
+    expect(await findListenerProcesses()).toEqual(new Map());
+  });
 });
 
 describe("Windows process start time", () => {
-  it("从当前 PID 的 CreationDate 获取启动时间且不弹出探测窗口", async () => {
+  it("直接从当前 PID 的进程句柄获取启动时间且不弹出探测窗口", async () => {
     const timestamp = Date.UTC(2026, 10, 14, 6, 19, 31);
     io.exec.mockResolvedValue({ stdout: `\uFEFF${timestamp}\r\n` });
     expect(await processStartedAt(1234)).toBe(timestamp);
     const args = io.exec.mock.calls[0]?.[1] as string[];
     const script = Buffer.from(args.at(-1)!, "base64").toString("utf16le");
-    expect(script).toContain('ProcessId=1234');
-    expect(script).toContain("CreationDate");
+    expect(script).toContain("[GhRunnerProcesses]::Read(1234, $null).StartedAt");
+    expect(script).toContain("GetProcessTimes");
     expect(script).toContain("ToUnixTimeMilliseconds");
+    expect(script).not.toMatch(/Get-CimInstance|Get-WmiObject/);
     expect(io.exec.mock.calls[0]?.[2]).toMatchObject({ windowsHide: true, timeout: 5000 });
   });
 
