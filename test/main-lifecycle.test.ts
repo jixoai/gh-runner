@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => {
       reportPickerFailure: vi.fn(),
     },
     ui: { open: vi.fn(async () => {}), destroy: vi.fn(async () => {}), push: vi.fn() },
-    projection: { update: vi.fn(async () => {}), handleMenuClick: vi.fn() },
+    projection: { update: vi.fn(async () => {}), destroy: vi.fn(), handleMenuClick: vi.fn() },
   };
 });
 
@@ -81,6 +81,8 @@ describe("真实入口退出接线", () => {
     expect(mocks.fleet.destroy).toHaveBeenCalledOnce();
     expect(mocks.ui.destroy).toHaveBeenCalledOnce();
     expect(mocks.tray.destroy).toHaveBeenCalledOnce();
+    expect(mocks.projection.destroy).toHaveBeenCalledOnce();
+    expect(mocks.projection.destroy.mock.invocationCallOrder[0]).toBeLessThan(mocks.fleet.destroy.mock.invocationCallOrder[0]!);
   });
 
   it("退出菜单连点与迟到的打开事件不会重复清理或重新开窗", async () => {
@@ -95,8 +97,45 @@ describe("真实入口退出接线", () => {
     expect(mocks.fleet.destroy).toHaveBeenCalledOnce();
     expect(mocks.ui.destroy).toHaveBeenCalledOnce();
     expect(mocks.tray.destroy).toHaveBeenCalledOnce();
+    expect(mocks.projection.destroy).toHaveBeenCalledOnce();
     for (const subscribe of [mocks.fleet.onSnapshot, mocks.tray.onMenuClick, mocks.tray.onConnectionDead]) {
       expect(subscribe.mock.results[0]!.value).toHaveBeenCalledOnce();
     }
+  });
+
+  it("多个快照共享一次托盘同步，最终失败只记录一次且不阻断窗口推送", async () => {
+    let rejectUpdate!: (error: Error) => void;
+    const pending = new Promise<void>((_resolve, reject) => { rejectUpdate = reject; });
+    mocks.projection.update.mockReturnValueOnce(pending).mockReturnValueOnce(pending);
+    const reportError = vi.spyOn(console, "error").mockImplementation(() => {});
+    await import("../src/main.ts");
+    await vi.waitFor(() => expect(mocks.tray.onConnectionDead).toHaveBeenCalledOnce());
+    const onSnapshot = mocks.fleet.onSnapshot.mock.calls[0]![0];
+    onSnapshot({} as never);
+    onSnapshot({} as never);
+    const error = new Error("setMenu timeout after retries");
+    rejectUpdate(error);
+    await vi.waitFor(() => expect(reportError).toHaveBeenCalledExactlyOnceWith("[gh-runner] 更新托盘失败:", error));
+    expect(mocks.ui.push).toHaveBeenCalledTimes(2);
+    expect(mocks.fleet.destroy).not.toHaveBeenCalled();
+    expect(process.exit).not.toHaveBeenCalled();
+  });
+
+  it("退出后迟到的托盘失败不再记录错误或重新同步", async () => {
+    let rejectUpdate!: (error: Error) => void;
+    mocks.projection.update.mockReturnValueOnce(new Promise<void>((_resolve, reject) => { rejectUpdate = reject; }));
+    const reportError = vi.spyOn(console, "error").mockImplementation(() => {});
+    await import("../src/main.ts");
+    await vi.waitFor(() => expect(mocks.tray.onConnectionDead).toHaveBeenCalledOnce());
+    const onSnapshot = mocks.fleet.onSnapshot.mock.calls[0]![0];
+    onSnapshot({} as never);
+    mocks.actions!.quit();
+    await vi.waitFor(() => expect(process.exit).toHaveBeenCalledExactlyOnceWith(0));
+    rejectUpdate(new Error("broker connection closed"));
+    await Promise.resolve();
+    onSnapshot({} as never);
+    expect(reportError).not.toHaveBeenCalled();
+    expect(mocks.projection.update).toHaveBeenCalledOnce();
+    expect(mocks.projection.destroy).toHaveBeenCalledOnce();
   });
 });

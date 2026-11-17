@@ -271,9 +271,11 @@ async function main(): Promise<void> {
   let stopSnapshots = () => {};
   let stopMenu = () => {};
   let stopConnectionDead = () => {};
+  let stopProjection = () => {};
+  let lastTrayUpdate: Promise<void> | null = null;
   const lifecycle = new AppLifecycle(
     [
-      () => { stopSnapshots(); stopMenu(); stopConnectionDead(); },
+      () => { stopSnapshots(); stopMenu(); stopConnectionDead(); stopProjection(); },
       () => fleet.destroy(),
       () => uiHost.destroy(),
       () => tray.destroy(),
@@ -295,9 +297,16 @@ async function main(): Promise<void> {
     openInstance: () => openWindow(),
     quit: () => void shutdown(),
   });
+  stopProjection = () => projection.destroy();
   stopSnapshots = fleet.onSnapshot((snap) => {
     if (lifecycle.stopping) return;
-    void projection.update(snap).catch((err) => console.error("[gh-runner] 更新托盘失败:", err));
+    const update = projection.update(snap);
+    if (update !== lastTrayUpdate) {
+      lastTrayUpdate = update;
+      void update.catch((err) => {
+        if (!lifecycle.stopping) console.error("[gh-runner] 更新托盘失败:", err);
+      });
+    }
     uiHost.push(snap);
   });
   stopMenu = tray.onMenuClick(({ itemId }) => {
